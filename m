@@ -1,7 +1,7 @@
 #!/bin/bash
 
-pushd ..
-source android.env
+pushd ../..
+source ./android.env
 popd
 
 if [ ! -n "${1+1}" ]; then
