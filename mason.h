@@ -26,38 +26,60 @@
 #define MASON_DONE    0x5
 #define MASON_RSST    0x6
 
+/* Packet sizes */
+#define LL_MTU  1500
+
+/* Identity Management */
+struct masonid {
+  __u8   pub_key[RSA_LEN];
+  __be16 id;  /* This id must be a assigned by the initiator to ensure that it is unique */
+};
+  
 /* header for all mason packets */
 struct masonhdr {
-  unsigned char type;
+#if defined(__LITTLE_ENDIAN_BITFIELD)
+  __u8 sig:1,
+    type:4,
+    version:3;
+#elif defined (__BIG_ENDIAN_BITFIELD)
+  __u8 version:3,
+    type:4,
+    sig:1;
+#else
+#error "Please fix <asm/byteorder.h>"
+#endif
+  __s8   rssi;
   __be64 uid;
 } __attribute((packed))__;
 
 /* initiate packet */
 struct initpkt {
   struct masonhdr hdr;
-  unsigned char publickey[RSA_LEN];
-  
+  __u8 pub_key[RSA_LEN];
 } __attribute((packed))__;
 
 /* participate packet */
 struct parpkt {
   struct masonhdr hdr;
-  unsigned char publickey[RSA_LEN];
+  __u8 pub_key[RSA_LEN];
 } __attribute((packed))__;
 
 /* participant list packet */
 struct parlistpkt {
   struct masonhdr hdr;
+  __be16 num_ids;
 } __attribute((packed))__;
 
 /* transmit request packet */
 struct txreqpkt {
   struct masonhdr hdr;
+  __be16 id;
 } __attribute__((packed))__;
 
 /* rssi measurement packet */
 struct measpkt {
   struct masonhdr hdr;
+  __be16 id;
 } __attribute__((packed))__;
 
 /* measurement done packet */
@@ -68,6 +90,7 @@ struct donepkt {
 /* RSST packet */
 struct rsstpkt {
   struct masonhdr hdr;
+  __be16 len;
 } __attribute__((packed))__;
 
 
