@@ -1,8 +1,8 @@
 #!/bin/bash
 
-pushd ../..
-source ./android.env
-popd
+export KERNEL_DIR=/usr/src/linux
+export ARCH=x86_64
+export CROSS_COMPILE=
 
 if [ ! -n "${1+1}" ]; then
     NUMPROC=1

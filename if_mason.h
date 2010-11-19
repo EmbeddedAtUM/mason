@@ -1,11 +1,11 @@
-/* mason.h --- 
+/* if_mason.h --- 
  * 
- * Filename: mason.h
+ * Filename: if_mason.h
  * Author: David Bild <drbild@umich.edu>
  * Created: 11/05/2010
  * 
- * Description: Kernel module for mason protocol (L3 network layer
- * implementation.
+ * Description: Public network interface definitions for mason
+ *              protocol (L3 kernel implementation).
  */
 #ifndef _IF_MASON_H
 #define _IF_MASON_H
@@ -13,11 +13,15 @@
 #include <linux/types.h>
 #include <linux/skbuff.h>
 
+/* Packet sizes */
+#define LL_MTU  1500 /* TODO: This should be determined dynamically from
+			the active */
+
 /* Mason Protocol ethertype*/
 #define ETH_P_MASON 0x2355
 
 /* RSA SIGNATURE */
-#define RSA_LEN 768/8
+#define RSA_LEN (768/8)
 
 /*  MASON PACKETS */
 /* mason packet types */
@@ -26,19 +30,12 @@
 #define MASON_PARLIST 0x2
 #define MASON_TXREQ   0x3
 #define MASON_MEAS    0x4
-#define MASON_DONE    0x5
+#define MASON_RSSTREQ 0x5
 #define MASON_RSST    0x6
+#define MASON_ABORT   0x7
 
-/* Packet sizes */
-#define LL_MTU  1500
-
-/* Identity Management */
-struct masonid {
-  __u8   pub_key[RSA_LEN];
-  __be16 id;  /* This id must be a assigned by the initiator to ensure that it is unique */
-};
-  
 /* header for all mason packets */
+#define MASON_HDR_LEN 14
 struct masonhdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
   __u8 sig:1,
@@ -52,47 +49,70 @@ struct masonhdr {
 #error "Please architecture bitfield endianness in fix <asm/byteorder.h>"
 #endif
   __s8   rssi;
-  __be64 uid;
-} __attribute((packed))__;
+  __be32 rnd_id;
+  __be16 sender_uid;
+  __be16 pkt_uid;
+} __attribute__((packed));
 
 static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
 {
-	return (struct mason *)skb_network_header(skb);
+  return (struct masonhdr *)skb_network_header(skb);
 }
 
 /* initiate packet */
-struct initpkt {
+struct init_masonpkt {
   __u8 pub_key[RSA_LEN];
-} __attribute((packed))__;
+} __attribute__((packed));
 
 /* participate packet */
-struct parpkt {
+struct par_masonpkt {
   __u8 pub_key[RSA_LEN];
-} __attribute((packed))__;
+} __attribute__((packed));
 
 /* participant list packet */
-struct parlistpkt {
-  __be16 num_ids;
-} __attribute((packed))__;
+struct parlist_masonpkt {
+  __be16 len;
+} __attribute__((packed));
 
 /* transmit request packet */
-struct txreqpkt {
+struct txreq_masonpkt {
   __be16 id;
-} __attribute__((packed))__;
+} __attribute__((packed));
 
 /* rssi measurement packet */
-struct measpkt {
+struct meas_masonpkt {
   __be16 id;
-} __attribute__((packed))__;
+} __attribute__((packed));
 
-/* measurement done packet */
-struct donepkt {
-} __attribute__((packed))__;
+/* RSST request packet */
+struct rsstreq_masonpkt {
+  __be16 id;
+} __attribute__((packed));
 
 /* RSST packet */
-struct rsstpkt {
+struct rsst_masonpkt {
   __be16 len;
-} __attribute__((packed))__;
+} __attribute__((packed));
+
+/* Abort packet */
+struct abort_masonpkt {
+} __attribute__((packed));
+
+/* 
+ * Tail of packet containing signature.  The inclusion of a tail is
+ * indicated by the 'sig' bit in the header.
+ */
+struct masontail {
+  __u8 sig[RSA_LEN];
+};
+
+static inline void *mason_typehdr(const struct sk_buff *skb)
+{
+  return mason_hdr(skb) + MASON_HDR_LEN;
+}
+
+static struct masontail *mason_tail(const struct sk_buff *skb);
+
 
 
 #endif /* _IF_MASON_H */
