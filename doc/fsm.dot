@@ -1,0 +1,27 @@
+digraph fsm {
+	ENTER; Idle; TERMINATE; "*";
+	ENTER->Idle ;
+	"*"->Idle [label="abort round"];
+	"*"->TERMINATE [label="quit"];
+	"c_*"; c_parlist; c_txreq; c_rsstreq
+	"c_*"->Idle [label="Xms timeout"];
+	Idle->c_parlist [label="receive 'init'/\nsend 'par'"];
+	c_parlist->c_parlist [label="receive 'parlist'/\nprocess 'parlist'"];
+	c_parlist->c_txreq [label="receive 'txreq'/\nsend 'meas' if for me"];
+	c_txreq->c_txreq [label="receive 'txreq'/\nsend 'meas' if for me"];
+	c_txreq->Idle [label="receive 'rsstreq' if for me/\nsend 'rsst'"];
+	c_txreq->c_rsstreq [label="receive 'rsstreq' not for me/\nnothing"];
+	c_rsstreq->c_rsstreq[label="receive 'rsstreq' not for me/\nnothing"];
+	c_rsstreq->Idle [label="receive 'rsstreq' for me/\nsend 'rsst'"];
+	s_par; s_meas; s_rsst;
+	Idle->s_par [label="start round/\nsend 'init'"];
+	s_par->s_par [label="receive 'par'/\nrecord par"];
+	s_par->Idle [label="receive 401st 'par'/\nsend 'abort'"];
+	s_par->Idle [label="Yms timeout, <M 'par'/\nsend 'abort'"];
+	s_par->s_meas [label="Yms timeout, >=M 'par'/\nsend 'parlist', send'txreq'"];
+	s_meas->s_meas [label="receive 'meas' or Zms timeout, txreq left/\nsend 'txreq'"];
+	s_meas->s_rsst [label="receive 'meas' or Zms timeout, no txtreq left/\nsend 'rsstreq'"];
+	s_rsst->s_rsst [label="receive 'rsst' or Wms timeout, rsst left/\nsend 'rsstreq'"];
+	s_rsst->Idle [label="receive 'rsst' or Wms timeout, no rsst left/\nprocess results'"];
+}
+
