@@ -7,8 +7,11 @@
  * Description: Kernel module for mason protocol (L3 network layer
  * implementation.
  */
+#ifndef _IF_MASON_H
+#define _IF_MASON_H
 
 #include <linux/types.h>
+#include <linux/skbuff.h>
 
 /* Mason Protocol ethertype*/
 #define ETH_P_MASON 0x2355
@@ -46,51 +49,50 @@ struct masonhdr {
     type:4,
     sig:1;
 #else
-#error "Please fix <asm/byteorder.h>"
+#error "Please architecture bitfield endianness in fix <asm/byteorder.h>"
 #endif
   __s8   rssi;
   __be64 uid;
 } __attribute((packed))__;
 
+static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
+{
+	return (struct mason *)skb_network_header(skb);
+}
+
 /* initiate packet */
 struct initpkt {
-  struct masonhdr hdr;
   __u8 pub_key[RSA_LEN];
 } __attribute((packed))__;
 
 /* participate packet */
 struct parpkt {
-  struct masonhdr hdr;
   __u8 pub_key[RSA_LEN];
 } __attribute((packed))__;
 
 /* participant list packet */
 struct parlistpkt {
-  struct masonhdr hdr;
   __be16 num_ids;
 } __attribute((packed))__;
 
 /* transmit request packet */
 struct txreqpkt {
-  struct masonhdr hdr;
   __be16 id;
 } __attribute__((packed))__;
 
 /* rssi measurement packet */
 struct measpkt {
-  struct masonhdr hdr;
   __be16 id;
 } __attribute__((packed))__;
 
 /* measurement done packet */
 struct donepkt {
-  struct masonhdr hdr;
 } __attribute__((packed))__;
 
 /* RSST packet */
 struct rsstpkt {
-  struct masonhdr hdr;
   __be16 len;
 } __attribute__((packed))__;
 
 
+#endif /* _IF_MASON_H */
