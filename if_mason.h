@@ -15,7 +15,7 @@
 
 /* Packet sizes */
 #define LL_MTU  1500 /* TODO: This should be determined dynamically from
-			the active */
+			the active device */
 
 /* Mason Protocol ethertype*/
 #define ETH_P_MASON 0x2355
@@ -35,7 +35,7 @@
 #define MASON_ABORT   0x7
 
 /* header for all mason packets */
-#define MASON_HDR_LEN 14
+#define MASON_HDR_LEN 10
 struct masonhdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
   __u8 sig:1,
@@ -50,9 +50,9 @@ struct masonhdr {
 #endif
   __s8   rssi;
   __be32 rnd_id;
-  __be16 sender_uid;
+  __be16 sender_id;
   __be16 pkt_uid;
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
 {
@@ -62,41 +62,46 @@ static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
 /* initiate packet */
 struct init_masonpkt {
   __u8 pub_key[RSA_LEN];
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* participate packet */
 struct par_masonpkt {
   __u8 pub_key[RSA_LEN];
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* participant list packet */
 struct parlist_masonpkt {
   __be16 len;
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* transmit request packet */
 struct txreq_masonpkt {
   __be16 id;
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* rssi measurement packet */
 struct meas_masonpkt {
   __be16 id;
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* RSST request packet */
 struct rsstreq_masonpkt {
   __be16 id;
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* RSST packet */
 struct rsst_masonpkt {
   __be16 len;
-} __attribute__((packed));
+  __u8   frag; /*
+		* 0x0 if this is the final packet 
+		* 0x1 if additional packets are required to complete
+		*     transmission of the full RSST
+		*/
+} __attribute__((__packed__));
 
 /* Abort packet */
 struct abort_masonpkt {
-} __attribute__((packed));
+} __attribute__((__packed__));
 
 /* 
  * Tail of packet containing signature.  The inclusion of a tail is

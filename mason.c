@@ -19,6 +19,186 @@
 #define DRIVER_AUTHOR "David R. Bild <drbild@umich.edu>"
 #define DRIVER_DESC   "Mason Protocol"
 
+/* **************************************************************
+ * State Machine transition functions
+ * ************************************************************** */
+static enum fsm_state fsm_idle_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_parlist_packet(struct sk_buff *skb){
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_txreq_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_rsstreq_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_par_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_meas_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_rsst_packet(struct sk_buff *skb)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_idle_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_parlist_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_txreq_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_rsstreq_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_par_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_meas_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_rsst_timeout(long data)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_idle_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_parlist_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_txreq_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_c_rsstreq_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_par_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_meas_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+static enum fsm_state fsm_s_rsst_quit(void)
+{
+  return fsm_idle; /* TODO: Implement this handler */
+}
+
+
+/* **************************************************************
+ * Main State Machine
+ * ************************************************************** */
+/* Functions must be ordered same as fsm_state enum declaration */
+static enum fsm_state (*fsm_packet_trans[])(struct sk_buff *) = {
+  &fsm_idle_packet,
+  &fsm_c_parlist_packet,
+  &fsm_c_txreq_packet,
+  &fsm_c_rsstreq_packet,
+  &fsm_s_par_packet,
+  &fsm_s_meas_packet,
+  &fsm_s_rsst_packet,
+};
+
+/* Functions must be ordered same as fsm_state enum declaration */
+static enum fsm_state (*fsm_timeout_trans[])(long)  = {
+  &fsm_idle_timeout,
+  &fsm_c_parlist_timeout,
+  &fsm_c_txreq_timeout,
+  &fsm_c_rsstreq_timeout,
+  &fsm_s_par_timeout,
+  &fsm_s_meas_timeout,
+  &fsm_s_rsst_timeout,
+};
+
+/* Functions must be ordered same as fsm_state enum declaration */
+static enum fsm_state (*fsm_quit_trans[])(void) = {
+  &fsm_idle_quit,
+  &fsm_c_parlist_quit,
+  &fsm_c_txreq_quit,
+  &fsm_c_rsstreq_quit,
+  &fsm_s_par_quit,
+  &fsm_s_meas_quit,
+  &fsm_s_rsst_quit,
+};
+
+static int fsm_dispatch_timeout(struct fsm *fsm, long data)
+{
+  int rc;
+  rc = down_interruptible(&fsm->sem);
+  if (0 == rc) {
+    fsm->cur_state = fsm_timeout_trans[fsm->cur_state](data);
+  }
+  up(&fsm->sem);
+  return rc;
+}
+
+static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
+{
+  int rc;
+  rc = down_interruptible(&fsm->sem);
+  if (0 == rc) {
+    fsm->cur_state = fsm_packet_trans[fsm->cur_state](skb);
+  }
+  up(&fsm->sem);
+  return rc;
+}
+
+static int fsm_dispatch_quit(struct fsm *fsm)
+{
+  int rc;
+  rc = down_interruptible(&fsm->sem);
+  if (0 == rc) {
+    fsm->cur_state = fsm_quit_trans[fsm->cur_state]();
+  }
+  up(&fsm->sem);
+  return rc;
+}
+
+/* **************************************************************
+ *            Mason packet utility functions
+ * ************************************************************** */
 /*
  * Returns a pointer to the tail structure (aka signature) if the
  * packet header indicates that one is included. Otherwise, returns
@@ -57,9 +237,10 @@ static struct masontail *mason_tail(const struct sk_buff *skb)
   }
 }
 
-/*
- * Main Mason receive function
- */
+
+/* **************************************************************
+ *                   Network functions
+ * ************************************************************** */
 int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev) {
   return 0;
 }
@@ -69,6 +250,9 @@ static struct packet_type mason_packet_type = {
 	.func = mason_rcv,
 };
 
+/* **************************************************************
+ *                   Module functions
+ * ************************************************************** */
 static int __init mason_init(void)
 {
 	printk(KERN_INFO "Loading Mason Protocol Module\n");
