@@ -215,7 +215,7 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   rnd->tbl->max_id = 0;
   rnd->pkt_id = 0;
   get_random_bytes(&rnd->rnd_id, sizeof(rnd->rnd_id));
-  get_random_bytes(&rnd->pub_key, sizeof(rnd->pub_key));
+  //get_random_bytes(&rnd->pub_key, sizeof(rnd->pub_key));
 
   /* Add ourself to the id table */
   add_identity(rnd, 0, rnd->pub_key);
