@@ -218,7 +218,7 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   //get_random_bytes(&rnd->pub_key, sizeof(rnd->pub_key));
 
   /* Add ourself to the id table */
-  add_identity(rnd, 0, rnd->pub_key);
+  //add_identity(rnd, 0, rnd->pub_key);
 
   /* Create the packet */
   skb = create_mason_init(rnd);
@@ -458,6 +458,7 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
     skb = NULL;
   }
   
+  printk(KERN_INFO "Header info: %i %i %i", hdr->version, hdr->type, hdr->sig);
  out:
   return skb;
 }
