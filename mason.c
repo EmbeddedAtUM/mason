@@ -550,7 +550,7 @@ int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *p
   skb_reset_network_header(skb);
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
-    printk(KERN_INFO "Dropping packet with invalid Mason version number\n");
+    printk(KERN_INFO "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
     goto out;
   }
 
