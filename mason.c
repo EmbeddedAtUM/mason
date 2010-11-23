@@ -70,6 +70,7 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
     if (!reply) 
       goto err;
 
+    printk(KERN_INFO "Sending PAR message in reply to INIT");
     dev_queue_xmit(reply);
     ret = fsm_c_parlist;
     goto out;
@@ -114,7 +115,7 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
     typehdr = mason_typehdr(skb);
     
     printk(KERN_INFO "Received PAR message; adding identity\n");
-    add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
+    //add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
     goto out;
   default:
     goto out;
