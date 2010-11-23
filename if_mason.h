@@ -18,7 +18,8 @@
 			the active device */
 
 /* Mason Protocol ethertype*/
-#define ETH_P_MASON 0x2355
+#define ETH_P_MASON   0x2355
+#define MASON_VERSION 0x0
 
 /* RSA SIGNATURE */
 #define RSA_LEN (768/8)
