@@ -47,7 +47,7 @@ struct masonhdr {
     type:4,
     sig:1;
 #else
-#error "Please architecture bitfield endianness in fix <asm/byteorder.h>"
+#error "Please fix architecture bitfield endianness in <asm/byteorder.h>"
 #endif
   __s8   rssi;
   __be32 rnd_id;

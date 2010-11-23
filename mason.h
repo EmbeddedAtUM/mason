@@ -112,7 +112,7 @@ struct masonid {
 
 struct id_table {
   struct masonid *ids[MAX_PARTICIPANTS];
-  int num_ids;
+  short max_id;
 };
 
 /* Information associated with a round */
@@ -122,17 +122,20 @@ struct rnd_info {
   __u16 pkt_id;
   __u8 pub_key[RSA_LEN];
   struct net_device *dev;
-  struct id_table *ids;
+  struct id_table *tbl;
 };
 
 static inline struct rnd_info *new_rnd_info(void);
 static inline void free_rnd_info(struct rnd_info *ptr);
+
+static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
 
 /* **************************************************************
  *              Mason Packet utility functions
  * ************************************************************** */
 static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
+static struct sk_buff *create_mason_par(struct rnd_info *rnd);
 
 #endif /* _MASON_H */
 

@@ -13,6 +13,7 @@
 #include <linux/init.h>		/* Needed for the macros */
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
+#include <linux/random.h>
 #include <net/net_namespace.h>
 
 
@@ -36,9 +37,54 @@ static struct fsm *cur_fsm;
  * ************************************************************** */
 static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  printk(KERN_INFO "Received packet while in idle\n");
+  enum fsm_state ret;
+  struct masonhdr *hdr;
+  struct init_masonpkt *typehdr;
+  struct masonid *sender;
+  struct sk_buff *reply;
 
-  return fsm_idle; /* TODO: Implement this handler */
+  hdr = mason_hdr(skb);
+  switch (hdr->type) {
+  case MASON_INIT:
+    if (!pskb_may_pull(skb, sizeof(struct init_masonpkt))) {
+      ret = fsm_idle;
+      goto out;
+    }
+    
+    /* Save info from packet */
+    hdr = mason_hdr(skb);
+    typehdr = (struct init_masonpkt *) mason_typehdr(skb);
+    
+    rnd->dev = skb->dev;
+    rnd->rnd_id = ntohl(hdr->rnd_id);
+    if (0 > add_identity(rnd, ntohs(hdr->sender_id), typehdr->pub_key)) 
+      goto err;
+    
+    sender = rnd->tbl->ids[ntohs(hdr->sender_id)];
+    sender->hwaddr = kmalloc(skb->dev->addr_len, GFP_KERNEL);
+    if (!sender->hwaddr || !dev_parse_header(skb, sender->hwaddr)) 
+      goto err;
+
+    /* Send PAR message */
+    reply = create_mason_par(rnd);
+    if (!reply) 
+      goto err;
+
+    dev_queue_xmit(reply);
+    ret = fsm_c_parlist;
+    goto out;
+  default:
+    ret = fsm_idle;
+    goto out;
+  }
+  
+ err:
+  /* TODO: Cleanup round info structures */
+  ret = fsm_idle;  
+  
+ out:
+  kfree_skb(skb);
+  return ret;
 }
 
 static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
@@ -57,7 +103,26 @@ static enum fsm_state fsm_c_rsstreq_packet(struct rnd_info *rnd, struct sk_buff 
 
 static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  return fsm_idle; /* TODO: Implement this handler */
+  struct masonhdr *hdr;
+  struct par_masonpkt *typehdr;
+
+  hdr = mason_hdr(skb);
+  switch (hdr->type) {
+  case MASON_PAR:
+    if (!pskb_may_pull(skb, sizeof(*typehdr))) 
+      goto out;
+    typehdr = mason_typehdr(skb);
+    
+    printk(KERN_INFO "Received PAR message; adding identity\n");
+    add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
+    goto out;
+  default:
+    goto out;
+  }
+
+  out:
+    kfree_skb(skb);
+    return fsm_s_par; 
 }
 
 static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb)
@@ -144,6 +209,17 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
 {
   struct sk_buff *skb;
 
+  /* Configure the round id */
+  rnd->my_id = 0;
+  rnd->tbl->max_id = 0;
+  rnd->pkt_id = 0;
+  get_random_bytes(&rnd->rnd_id, sizeof(rnd->rnd_id));
+  get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
+
+  /* Add ourself to the id table */
+  add_identity(rnd, 0, rnd->pub_key);
+
+  /* Create the packet */
   skb = create_mason_init(rnd);
   if (!skb)
     return fsm_idle;
@@ -325,6 +401,36 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len) {
   return skb;
 }
 
+static struct sk_buff *create_mason_par(struct rnd_info *rnd)
+{
+  struct sk_buff *skb;
+  struct masonhdr *hdr;
+  struct par_masonpkt *typehdr;
+
+  skb = create_mason_packet(rnd, sizeof(struct par_masonpkt));
+  if (!skb)
+    goto out;
+
+  /* Set the type in the header */
+  hdr = mason_hdr(skb);
+  hdr->type = MASON_PAR;
+
+  /* Set the type-specific data */
+  skb_put(skb, sizeof(struct par_masonpkt));
+  typehdr = (struct par_masonpkt *)mason_typehdr(skb);
+  memcpy(typehdr->pub_key, rnd->pub_key, sizeof(typehdr->pub_key));
+
+  /* Set the LL header */
+  if (0 > dev_hard_header(skb, skb->dev, ntohs(skb->protocol), rnd->tbl->ids[0]->hwaddr, NULL, skb->len)) {
+    printk(KERN_ERR "Failed to set device hard header on Mason Protocol packet\n");
+    kfree_skb(skb);
+    skb = NULL;
+  }
+
+ out:
+  return skb;
+}
+
 static struct sk_buff *create_mason_init(struct rnd_info *rnd) 
 {
   struct sk_buff *skb;
@@ -338,7 +444,7 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   /* Set the type in the header */
   hdr = mason_hdr(skb);
   hdr->type = MASON_INIT;
-  
+
   /* Set the type-specific data */
   skb_put(skb, sizeof(struct init_masonpkt));
   typehdr = (struct init_masonpkt *)mason_typehdr(skb);
@@ -355,6 +461,7 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   return skb;
 }
 
+
 /* **************************************************************
  *                  Round Info utility functions
  * ************************************************************** */
@@ -366,8 +473,8 @@ static struct rnd_info *new_rnd_info(void)
     goto out;
 
   ret->rnd_id = 0;
-  ret->ids = (struct id_table *) kzalloc(sizeof(*ret->ids), GFP_KERNEL);
-  if (ret->ids) 
+  ret->tbl = (struct id_table *) kzalloc(sizeof(*ret->tbl), GFP_KERNEL);
+  if (ret->tbl) 
     goto out; 
   
   kfree(ret);
@@ -379,7 +486,7 @@ static struct rnd_info *new_rnd_info(void)
 
 static void free_rnd_info(struct rnd_info *ptr)
 {
-  kfree(ptr->ids);
+  kfree(ptr->tbl);
   kfree(ptr);
 }
 
@@ -397,6 +504,32 @@ static void free_fsm(struct fsm *ptr)
   kfree(ptr);
 }
 
+static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
+{
+  struct id_table *tbl;
+  struct masonid *id;
+
+  tbl = rnd->tbl;  
+  if (tbl->ids[sender_id]) {
+    printk(KERN_INFO "Trying to add Mason protocol identity which already exists\n");
+    return -EINVAL;
+  }
+
+  id = kmalloc(sizeof(struct masonid), GFP_KERNEL);
+  if (!id) {
+    printk(KERN_ERR "Failed to allocate memeory for Mason protocol: masonid in id_table\n");
+    return -ENOMEM;
+  }
+  tbl->ids[sender_id] = id;
+
+  id->id = sender_id;
+  memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
+  id->head = NULL;
+  id->hwaddr = NULL;
+
+  return 0;
+}
+
 /* **************************************************************
  *                   Network functions
  * ************************************************************** */
@@ -412,6 +545,7 @@ int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *p
   if (!pskb_may_pull(skb, sizeof(struct masonhdr)))
     goto out;
   
+  skb_pull(skb, sizeof(struct masonhdr));
   skb_reset_network_header(skb);
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
