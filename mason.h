@@ -125,9 +125,14 @@ struct rnd_info {
   struct id_table *tbl;
 };
 
-static inline struct rnd_info *new_rnd_info(void);
-static inline void free_rnd_info(struct rnd_info *ptr);
+static struct rnd_info *new_rnd_info(void);
+static void free_rnd_info(struct rnd_info *ptr);
+static struct rnd_info *reset_rnd_info(struct rnd_info *ptr); 
 
+static void free_id_table(struct id_table *ptr);
+static void free_rssi_obs_list(struct rssi_obs *ptr);
+
+static void free_identity(struct masonid *ptr);
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
 
 /* **************************************************************

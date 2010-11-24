@@ -36,7 +36,7 @@
 #define MASON_ABORT   0x7
 
 /* header for all mason packets */
-#define MASON_HDR_LEN 10
+#define MASON_HDR_LEN 1
 struct masonhdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
   __u8 sig:1,
@@ -114,7 +114,7 @@ struct masontail {
 
 static inline void *mason_typehdr(const struct sk_buff *skb)
 {
-  return mason_hdr(skb) + MASON_HDR_LEN;
+  return mason_hdr(skb) + 1;
 }
 
 static struct masontail *mason_tail(const struct sk_buff *skb);

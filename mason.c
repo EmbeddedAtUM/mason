@@ -20,14 +20,15 @@
 #include "if_mason.h"
 #include "mason.h"
 
-MODULE_LICENSE("GPL");
-MODULE_AUTHOR("David R. Bild <drbild@umich.edu>");
-MODULE_AUTHOR("Indu Reddy <inreddyp@umich.edu>");	
 MODULE_DESCRIPTION("Mason Protocol");
+MODULE_LICENSE("GPL");
+MODULE_AUTHOR("Indu Reddy <inreddyp@umich.edu>");	
+MODULE_AUTHOR("David R. Bild <drbild@umich.edu>");
 
-static short int is_initiator = 0;
-module_param(is_initiator, short, 0);
-MODULE_PARM_DESC(is_initiator, "1 if the module should initiate a round of mason test\n");
+
+static short int init = 0;
+module_param(init, short, 0);
+MODULE_PARM_DESC(init, "1 if the module should initiate a round of mason test\n");
 
 static struct net_device *mason_dev;
 static struct fsm *cur_fsm;
@@ -55,6 +56,7 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
     hdr = mason_hdr(skb);
     typehdr = (struct init_masonpkt *) mason_typehdr(skb);
     
+    dev_hold(skb->dev);
     rnd->dev = skb->dev;
     rnd->rnd_id = ntohl(hdr->rnd_id);
     if (0 > add_identity(rnd, ntohs(hdr->sender_id), typehdr->pub_key)) 
@@ -64,13 +66,23 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
     sender->hwaddr = kmalloc(skb->dev->addr_len, GFP_KERNEL);
     if (!sender->hwaddr || !dev_parse_header(skb, sender->hwaddr)) 
       goto err;
+#ifdef MASON_DEBUG
+    printk(KERN_DEBUG "Mason initiator hwaddr:%x:%x:%x:%x:%x:%x\n",
+	   sender->hwaddr[0], sender->hwaddr[1], sender->hwaddr[2], sender->hwaddr[3], sender->hwaddr[4], sender->hwaddr[5]);
+#endif
+    
+
+    /* Set the public key */
+    get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
 
     /* Send PAR message */
     reply = create_mason_par(rnd);
     if (!reply) 
       goto err;
 
-    printk(KERN_INFO "Sending PAR message in reply to INIT\n");
+#ifdef MASON_DEBUG
+    printk(KERN_DEBUG "Sending Mason PAR message in reply to INIT\n");
+#endif
     dev_queue_xmit(reply);
     ret = fsm_c_parlist;
     goto out;
@@ -80,7 +92,7 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
   }
   
  err:
-  /* TODO: Cleanup round info structures */
+  reset_rnd_info(rnd);
   ret = fsm_idle;  
   
  out:
@@ -114,7 +126,9 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
       goto out;
     typehdr = mason_typehdr(skb);
     
-    printk(KERN_INFO "Received PAR message; adding identity\n");
+#ifdef MASON_DEBUG
+    printk(KERN_DEBUG "Received PAR message\n");
+#endif
     add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
     goto out;
   default:
@@ -217,14 +231,14 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   get_random_bytes(&rnd->rnd_id, sizeof(rnd->rnd_id));
   get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
 
-  /* Add ourself to the id table */
-  add_identity(rnd, 0, rnd->pub_key);
-
   /* Create the packet */
   skb = create_mason_init(rnd);
   if (!skb)
     return fsm_idle;
   
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Sending Mason INIT message\n");
+#endif
   dev_queue_xmit(skb);
   return fsm_s_par;
 }
@@ -279,6 +293,10 @@ static enum fsm_state (*fsm_initiate_trans[])(struct rnd_info *) = {
 static int fsm_dispatch_timeout(struct fsm *fsm, long data)
 {
   int rc;
+
+  if (!fsm || !fsm->rnd)
+    return 0;
+
   rc = down_interruptible(&fsm->sem);
   if (0 == rc) {
     if (fsm_timeout_trans[fsm->cur_state])
@@ -291,6 +309,13 @@ static int fsm_dispatch_timeout(struct fsm *fsm, long data)
 static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
 {
   int rc;
+
+  if (!fsm)
+    return 0;
+
+  if (!fsm->rnd)
+    fsm->rnd  = new_rnd_info();
+
   rc = down_interruptible(&fsm->sem);
   if (0 == rc) {
     if (fsm_packet_trans[fsm->cur_state])
@@ -303,6 +328,10 @@ static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
 static int fsm_dispatch_quit(struct fsm *fsm)
 {
   int rc;
+
+  if (!fsm)
+    return 0;
+
   rc = down_interruptible(&fsm->sem);
   if (0 == rc) {
     if (fsm_quit_trans[fsm->cur_state])
@@ -315,6 +344,13 @@ static int fsm_dispatch_quit(struct fsm *fsm)
 static int fsm_dispatch_initiate(struct fsm *fsm)
 {
   int rc;
+
+  if (!fsm)
+    return 0;
+
+  if (!fsm->rnd)
+    fsm->rnd = new_rnd_info();
+
   rc = down_interruptible(&fsm->sem);
   if (0 == rc) {
     if (fsm_initiate_trans[fsm->cur_state])
@@ -447,8 +483,8 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   hdr->type = MASON_INIT;
 
   /* Set the type-specific data */
-  skb_put(skb, sizeof(struct init_masonpkt));
   typehdr = (struct init_masonpkt *)mason_typehdr(skb);
+  skb_put(skb, sizeof(struct init_masonpkt));
   memcpy(typehdr->pub_key, rnd->pub_key, sizeof(typehdr->pub_key));
 
   /* Set the LL header */
@@ -466,6 +502,21 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
 /* **************************************************************
  *                  Round Info utility functions
  * ************************************************************** */
+static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
+{
+  if (!ptr)
+    return NULL;
+
+  ptr->rnd_id = 0;
+  ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_KERNEL);
+  if (!ptr->tbl) {
+    kfree(ptr);
+    ptr = NULL;
+  }
+  
+  return ptr;
+}
+
 static struct rnd_info *new_rnd_info(void)
 {
   struct rnd_info *ret;
@@ -473,21 +524,54 @@ static struct rnd_info *new_rnd_info(void)
   if (!ret)
     goto out;
 
-  ret->rnd_id = 0;
-  ret->tbl = (struct id_table *) kzalloc(sizeof(*ret->tbl), GFP_KERNEL);
-  if (ret->tbl) 
-    goto out; 
-  
-  kfree(ret);
-  ret = NULL;
-  
+  ret =  __setup_rnd_info(ret);
+
  out:
   return ret;
 }
 
+static struct rnd_info *reset_rnd_info(struct rnd_info *ptr)
+{
+  if (!ptr)
+    return NULL;
+  
+  if (ptr->dev) {
+    dev_put(ptr->dev);
+    ptr->dev = NULL;
+  }
+    
+  if (ptr->tbl)
+    free_id_table(ptr->tbl);
+
+  return __setup_rnd_info(ptr);
+}
+
 static void free_rnd_info(struct rnd_info *ptr)
 {
-  kfree(ptr->tbl);
+  if (!ptr)
+    return;
+
+  if (ptr->dev)
+    dev_put(ptr->dev);
+  
+  if (ptr->tbl)
+    free_id_table(ptr->tbl);
+  
+  kfree(ptr);
+}
+
+static void free_id_table(struct id_table *ptr)
+{
+  int i;
+
+  if (!ptr)
+    return;
+
+  for (i = 0; i < MAX_PARTICIPANTS; ++i) {
+    if (ptr->ids[i])
+      free_identity(ptr->ids[i]);
+  }
+
   kfree(ptr);
 }
 
@@ -504,6 +588,31 @@ static void free_fsm(struct fsm *ptr)
 {
   kfree(ptr);
 }
+   
+static void free_rssi_obs_list(struct rssi_obs *head)
+{
+  struct rssi_obs *next = head;
+
+  if (!head)
+    return;
+
+  do {
+    head = next;
+    next = head->next;
+    kfree(head);
+  } while (next);
+}
+
+static void free_identity(struct masonid *ptr)
+{
+  if (ptr->hwaddr)
+    kfree(ptr->hwaddr);
+  
+  if (ptr->head)
+    free_rssi_obs_list(ptr->head);
+
+  kfree(ptr);
+}
 
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 {
@@ -512,7 +621,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 
   tbl = rnd->tbl;  
   if (tbl->ids[sender_id]) {
-    printk(KERN_INFO "Trying to add Mason protocol identity which already exists\n");
+    printk(KERN_ERR "Trying to add Mason protocol identity which already exists\n");
     return -EINVAL;
   }
 
@@ -527,6 +636,11 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
   id->head = NULL;
   id->hwaddr = NULL;
+
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Added Mason Identity: rnd:%d sender_id:%d pub_key:%x%x%x%x...\n", 
+	 rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
+#endif  
 
   return 0;
 }
@@ -550,11 +664,13 @@ int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *p
   skb_pull(skb, sizeof(struct masonhdr));
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
-    printk(KERN_INFO "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
+    printk(KERN_ERR "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
     goto out;
   }
 
-  printk(KERN_INFO "Dispatching Mason protocol packet\n");
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Dispatching Mason protocol packet\n");
+#endif
   fsm_dispatch_packet(cur_fsm, skb);
   return rc;
   
@@ -597,20 +713,11 @@ static int __init mason_init(void)
     dev_put(mason_dev);
     return -ENOMEM;
   }
-
-  cur_fsm->rnd = new_rnd_info();
-
-  if (!cur_fsm->rnd) {
-    printk(KERN_ERR "Failed to allocate memory for struct rnd_info\n");
-    dev_put(mason_dev);
-    free_fsm(cur_fsm);
-    return -ENOMEM;
-  }
   
   dev_add_pack(&mason_packet_type);
 
-  if (1 == is_initiator) {
-    msleep(5000);
+  if (1 == init) {
+    msleep(1500);
     fsm_dispatch_initiate(cur_fsm);
   }
   
