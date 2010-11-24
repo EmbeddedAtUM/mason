@@ -14,7 +14,7 @@
 #include <linux/netdevice.h>
 #include <linux/semaphore.h>
 
-#define MAX_PARTICIPANTS 400
+#define MAX_PARTICIPANTS 3
 #define RSA_LEN 20
 
 /* **************************************************************
@@ -55,6 +55,7 @@ struct pkt_size_info {
 };
 
 struct pkt_id_and_rssi {
+	__u16 id;
 	__u16 pkt_id;
 	__s8 rssi;
 };

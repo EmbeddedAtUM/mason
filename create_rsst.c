@@ -25,7 +25,7 @@
 #define MAX_PACKET_SIZE 1500
 
 
-static const char DEV_NAME[]  = "tiwlan0";
+static const char DEV_NAME[]  = "lo";
 
 static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, int initial_participant)
 {
@@ -33,26 +33,24 @@ static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, i
 	int participant = initial_participant;
 	struct rssi_obs * tmp_rssi_obs;
 	struct pkt_size_info required_pkt_size;
-
+	
 	while(table->ids[participant])
 	{
 		/* storing the feasible pkt_size */
 		required_pkt_size.pkt_size = pkt_size;
 
-		/* senderid */
-		pkt_size  = pkt_size + sizeof(table->ids[participant]->id);
-
-		/* packet id and rssi */
+		/* initializing a temporary struct to store packet id and rssi */
 		tmp_rssi_obs = (table->ids[participant])->head;
-		pkt_size = pkt_size + sizeof(tmp_rssi_obs->pkt_id);
-		pkt_size = pkt_size + sizeof(tmp_rssi_obs->rssi);
 		
-		/* checking for further packets if any */
-		while (tmp_rssi_obs->next) 
+		while (tmp_rssi_obs) 
 		{
-			tmp_rssi_obs = tmp_rssi_obs->next;
+			/* senderid */
+			pkt_size  = pkt_size + sizeof(table->ids[participant]->id);
+			/* pkt_id and rssi */
 			pkt_size = pkt_size + sizeof(tmp_rssi_obs->pkt_id);
 			pkt_size = pkt_size + sizeof(tmp_rssi_obs->rssi);
+
+			tmp_rssi_obs = tmp_rssi_obs->next;
 		}
 		
 		if ( (pkt_size > MAX_PACKET_SIZE))
@@ -75,29 +73,26 @@ static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, i
 void insert_rsst_data(struct sk_buff *skb, struct id_table *table, int initial_participant, int final_participant)
 {
 	int participant;
-	char * data;
 	struct rssi_obs * tmp_rssi_obs;
-	__u16 * sender_id_ptr;
 	struct pkt_id_and_rssi *tmp_pkt_rssi;
 
-	data = skb->data;
+	/* Temporary struct to put senderid, pkt_id and rssi into skb->data*/
+	tmp_pkt_rssi = ( struct pkt_id_and_rssi *) skb->data;
 
 	for (participant = initial_participant; participant <= final_participant; participant++)
-	{	
-		sender_id_ptr = ( __u16 *) data;
-		*sender_id_ptr = table->ids[participant]->id;
-		sender_id_ptr++;
-
-		tmp_pkt_rssi = ( struct pkt_id_and_rssi *) sender_id_ptr ;
+	{
 		tmp_rssi_obs = table->ids[participant]->head;
-		while (tmp_rssi_obs->next)
+		while (tmp_rssi_obs)
 		{
+			/* storing information for one packet - senderid, pkt_id and rssi*/
+			tmp_pkt_rssi->id = table->ids[participant]->id;
 			tmp_pkt_rssi->pkt_id = tmp_rssi_obs->pkt_id;
 			tmp_pkt_rssi->rssi = tmp_rssi_obs->rssi;
+
+			/* Going to the next packet*/
 			tmp_rssi_obs = tmp_rssi_obs->next;
 			tmp_pkt_rssi++;
 		}
-		data = (char *)	tmp_pkt_rssi;
 	}
 }
 
@@ -109,7 +104,16 @@ struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *
 	struct pkt_size_info required_pkt_size;
 
 	mason_dev = dev_get_by_name(&init_net, DEV_NAME);
-
+	if (!mason_dev) {
+	  printk(KERN_ERR "Failed to find net_device for Mason Rate Test\n");
+	  return NULL;
+	}
+	
+	if (table == NULL )
+	{	
+		printk(KERN_ERR "id table is null\n");
+		return NULL;
+	}
 
 	/* Return Null if all the required packets are already created */
 	if (table->ids[state->start_participant] == NULL || state->start_participant > MAX_PARTICIPANTS)
@@ -123,10 +127,11 @@ struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *
 	
 	if (final_participant < initial_participant)
 	{
-		printk(KERN_INFO "Maximum allowed packet size is not sufficient\n");
+		printk(KERN_ERR "Maximum allowed packet size is not sufficient\n");
 		return NULL;
 	}
 	
+
 	skb = alloc_skb( (required_pkt_size.pkt_size) + LL_ALLOCATED_SPACE(mason_dev),GFP_KERNEL);
   
 	if (!skb) 
@@ -135,6 +140,7 @@ struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *
 		return NULL; 
   	}
     
+
 	skb->dev = mason_dev;
   
 	skb_reserve(skb, LL_RESERVED_SPACE(mason_dev));  /* reserve for L2 header */
@@ -151,13 +157,14 @@ struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *
 
 static int __init mason_create_rsst_init(void)
 {
-	printk(KERN_INFO "Loading Mason Rate Test Task Module\n");
+
+	printk(KERN_INFO "Loading Mason Create Rsst Module\n");
 	return 0;
 }
 
 static void __exit mason_create_rsst_exit(void)
 {
-	printk(KERN_INFO "Unloading Mason Rate Test Task Module\n");
+	printk(KERN_INFO "Unloading Mason Create Rsst Module\n");
 }
 
 module_init(mason_create_rsst_init);
