@@ -11,7 +11,7 @@
 #define _MASON_H
 
 #include <linux/netdevice.h>
-#include <linux/semaphore.h>
+#include <linux/spinlock.h>
 
 #define MAX_PARTICIPANTS 400
 #define DEV_NAME "tiwlan0"
@@ -43,7 +43,7 @@ enum fsm_input {
 
 struct rnd_info;
 struct fsm {
-  struct semaphore sem;
+  spinlock_t lock;
   enum fsm_state cur_state;
   struct rnd_info *rnd;
 };
@@ -52,7 +52,7 @@ static struct fsm *new_fsm(void);
 static void free_fsm(struct fsm *ptr);
 
 static inline void fsm_init(struct fsm *fsm) {
-  init_MUTEX(&fsm->sem);
+  fsm->lock = SPIN_LOCK_UNLOCKED;
   fsm->cur_state = fsm_idle;
 }
 

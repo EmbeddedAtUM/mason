@@ -63,7 +63,7 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
       goto err;
     
     sender = rnd->tbl->ids[ntohs(hdr->sender_id)];
-    sender->hwaddr = kmalloc(skb->dev->addr_len, GFP_KERNEL);
+    sender->hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
     if (!sender->hwaddr || !dev_parse_header(skb, sender->hwaddr)) 
       goto err;
 #ifdef MASON_DEBUG
@@ -292,23 +292,25 @@ static enum fsm_state (*fsm_initiate_trans[])(struct rnd_info *) = {
 
 static int fsm_dispatch_timeout(struct fsm *fsm, long data)
 {
-  int rc;
+  int rc = 0;
+  unsigned long flags;
 
   if (!fsm || !fsm->rnd)
     return 0;
-
-  rc = down_interruptible(&fsm->sem);
+  
+  spin_lock_irqsave(&fsm->lock, flags);
   if (0 == rc) {
     if (fsm_timeout_trans[fsm->cur_state])
       fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm->rnd, data);
+    spin_unlock_irqrestore(&fsm->lock, flags);
   }
-  up(&fsm->sem);
   return rc;
 }
 
 static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
 {
-  int rc;
+  int rc = 0;
+  unsigned long flags;
 
   if (!fsm)
     return 0;
@@ -316,34 +318,36 @@ static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
   if (!fsm->rnd)
     fsm->rnd  = new_rnd_info();
 
-  rc = down_interruptible(&fsm->sem);
+  spin_lock_irqsave(&fsm->lock, flags);
   if (0 == rc) {
     if (fsm_packet_trans[fsm->cur_state])
       fsm->cur_state = fsm_packet_trans[fsm->cur_state](fsm->rnd, skb);
+    spin_unlock_irqrestore(&fsm->lock, flags);
   }
-  up(&fsm->sem);
   return rc;
 }
 
 static int fsm_dispatch_quit(struct fsm *fsm)
 {
-  int rc;
+  int rc = 0;
+  unsigned long flags;
 
   if (!fsm)
     return 0;
 
-  rc = down_interruptible(&fsm->sem);
+  spin_lock_irqsave(&fsm->lock, flags);
   if (0 == rc) {
     if (fsm_quit_trans[fsm->cur_state])
       fsm->cur_state = fsm_quit_trans[fsm->cur_state](fsm->rnd);
+    spin_unlock_irqrestore(&fsm->lock, flags);
   }
-  up(&fsm->sem);
   return rc;
 }
 
 static int fsm_dispatch_initiate(struct fsm *fsm)
 {
-  int rc;
+  int rc = 0;
+  unsigned long flags;
 
   if (!fsm)
     return 0;
@@ -351,12 +355,12 @@ static int fsm_dispatch_initiate(struct fsm *fsm)
   if (!fsm->rnd)
     fsm->rnd = new_rnd_info();
 
-  rc = down_interruptible(&fsm->sem);
+  spin_lock_irqsave(&fsm->lock, flags);
   if (0 == rc) {
     if (fsm_initiate_trans[fsm->cur_state])
       fsm->cur_state = fsm_initiate_trans[fsm->cur_state](fsm->rnd);
+    spin_unlock_irqrestore(&fsm->lock, flags);
   }
-  up(&fsm->sem);
   return rc;
 }
 
@@ -414,7 +418,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len) {
   else
     dev = mason_dev;
   
-  skb = alloc_skb(LL_ALLOCATED_SPACE(dev) + sizeof(*hdr) + len, GFP_KERNEL);
+  skb = alloc_skb(LL_ALLOCATED_SPACE(dev) + sizeof(*hdr) + len, GFP_ATOMIC);
   if (!skb) {
     printk(KERN_ERR "Failed to allocate sk_buff for Mason packet\n");
     return NULL;
@@ -508,7 +512,7 @@ static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
     return NULL;
 
   ptr->rnd_id = 0;
-  ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_KERNEL);
+  ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_ATOMIC);
   if (!ptr->tbl) {
     kfree(ptr);
     ptr = NULL;
@@ -520,7 +524,7 @@ static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
 static struct rnd_info *new_rnd_info(void)
 {
   struct rnd_info *ret;
-  ret = (struct rnd_info *) kzalloc(sizeof(struct rnd_info), GFP_KERNEL);
+  ret = (struct rnd_info *) kzalloc(sizeof(struct rnd_info), GFP_ATOMIC);
   if (!ret)
     goto out;
 
@@ -578,7 +582,7 @@ static void free_id_table(struct id_table *ptr)
 static struct fsm *new_fsm(void)
 {
   struct fsm *ret;
-  ret = (struct fsm *) kzalloc(sizeof(struct fsm), GFP_KERNEL);
+  ret = (struct fsm *) kzalloc(sizeof(struct fsm), GFP_ATOMIC);
   if (ret)
     fsm_init(ret);
   return ret;
@@ -625,7 +629,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
     return -EINVAL;
   }
 
-  id = kmalloc(sizeof(struct masonid), GFP_KERNEL);
+  id = kmalloc(sizeof(struct masonid), GFP_ATOMIC);
   if (!id) {
     printk(KERN_ERR "Failed to allocate memeory for Mason protocol: masonid in id_table\n");
     return -ENOMEM;
@@ -717,7 +721,7 @@ static int __init mason_init(void)
   dev_add_pack(&mason_packet_type);
 
   if (1 == init) {
-    msleep(1500);
+    //msleep(1500);
     fsm_dispatch_initiate(cur_fsm);
   }
   
