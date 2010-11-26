@@ -26,6 +26,8 @@
 
 
 static const char DEV_NAME[]  = "lo";
+//static struct logfile mason_log;
+
 
 static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, int initial_participant)
 {
@@ -39,17 +41,16 @@ static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, i
 		/* storing the feasible pkt_size */
 		required_pkt_size.pkt_size = pkt_size;
 
+		/* senderid and count */
+		pkt_size  = pkt_size + sizeof(struct id_and_count);
+
 		/* initializing a temporary struct to store packet id and rssi */
 		tmp_rssi_obs = (table->ids[participant])->head;
 		
 		while (tmp_rssi_obs) 
 		{
-			/* senderid */
-			pkt_size  = pkt_size + sizeof(table->ids[participant]->id);
 			/* pkt_id and rssi */
-			pkt_size = pkt_size + sizeof(tmp_rssi_obs->pkt_id);
-			pkt_size = pkt_size + sizeof(tmp_rssi_obs->rssi);
-
+			pkt_size = pkt_size + sizeof(struct pkt_id_and_rssi);
 			tmp_rssi_obs = tmp_rssi_obs->next;
 		}
 		
@@ -70,22 +71,135 @@ static struct pkt_size_info get_required_pkt_size_info(struct id_table *table, i
 	return required_pkt_size;
 }
 
+/* information stored in the form [senderid][count][pkt_id][rssi][pkt_id][rssi]...[senderid][count][pkt_id][rssi]..*/
+void log_rsst_data(struct sk_buff *skb)
+{
+	struct mason_hdr *hdr;
+	struct pkt_id_and_rssi *tmp_pkt_rssi;
+	struct id_and_count *tmp_id_cnt;
+
+	int i, participant, rssi_count, position = 0;
+	int len = mason_log.length;
+	char * pos = mason_log.buffer + len;
+
+	// ***Need to be uncommented***** 
+	//hdr = mason_hdr(skb);
+	//
+	
+	hdr = (struct mason_hdr*)skb->data;
+	len += sprintf(pos,"Identity: %d\n",hdr->id );
+	pos = pos + len;
+
+	hdr++;
+	tmp_pkt_rssi = (struct pkt_id_and_rssi *)hdr;
+
+	while( (char *)skb_tail_pointer(skb) >= (char *) tmp_pkt_rssi )
+	{
+		tmp_id_cnt = (struct id_and_count *)tmp_pkt_rssi ;
+
+		participant = tmp_id_cnt->id;
+		rssi_count = tmp_id_cnt->rssi_obs_count;
+
+		tmp_id_cnt++;
+		tmp_pkt_rssi = ( struct pkt_id_and_rssi*) tmp_id_cnt;
+
+		/* Loop over all the packets*/
+		for(i = 0; i<rssi_count; i++)
+		{
+			len += sprintf(pos,"Received: time_or_position: %d packet_id: %d sender_id: %d\n",position,tmp_pkt_rssi->pkt_id,tmp_pkt_rssi->rssi);
+			pos = pos + len;
+			position++;
+			tmp_pkt_rssi++;
+		}
+		tmp_pkt_rssi++;
+	}
+
+	mason_log.length = len;
+
+}
+
+/* Receiving data at the initiator from one member of receiver set and storing into the data structure receiver_info */
+/*
+void get_rsst_data(struct sk_buff *skb, receiver_info *rcv_info)
+{
+	int participant,rssi_count,i;
+	struct rssi_obs *tmp_rssi_obs;
+	struct masonhdr *hdr;
+	struct id_table table;
+	struct pkt_id_and_rssi *tmp_pkt_rssi;
+	struct id_and_count *tmp_id_cnt;
+
+	hdr = mason_hdr(skb);
+	rcv_info->receiver_id = hdr->id;
+	hdr++;
+	tmp_pkt_rssi = (struct pkt_id_and_rssi *)hdr;
+
+	while( skb->tail != (char *)tmp_pkt_rssi )
+	{
+		tmp_id_cnt = (struct id_and_count *)tmp_pkt_rssi ;
+
+		participant = tmp_id_cnt->id;
+		rssi_count = tmp_id_cnt->rssi_obs_count;
+
+		// storing sender(participant) information
+		table.ids[participant] = kmalloc(sizeof(struct masonid), GFP_KERNEL);
+		table.ids[participant]->id = participant;
+		table.ids[participant]->rssi_obs_count = rssi_count;
+
+		tmp_id_cnt++;
+
+		tmp_pkt_rssi = ( struct pkt_id_and_rssi*) tmp_id_cnt;
+
+		// storing first packet information
+		tmp_rssi_obs = kmalloc(sizeof(struct rssi_obs), GFP_KERNEL);
+		tmp_rssi_obs->pkt_id = tmp_pkt_rssi->pkt_id;
+		tmp_rssi_obs->rssi = tmp_pkt_rssi->rssi;
+		table.ids[participant]->head = tmp_rssi_obs;
+
+		// For further packets
+		for(i = 1; i<rssi_count; i++)
+		{
+			tmp_pkt_rssi++;
+			
+			tmp_rssi_obs->next = kmalloc(sizeof(struct rssi_obs), GFP_KERNEL);
+			tmp_rssi_obs = tmp_rssi_obs->next;
+
+			tmp_rssi_obs->pkt_id = tmp_pkt_rssi->pkt_id;
+			tmp_rssi_obs->rssi = tmp_pkt_rssi->rssi;
+		}
+		tmp_pkt_rssi++;
+	}
+	rcv_info->tbl = &table;
+}
+*/
+
+
 void insert_rsst_data(struct sk_buff *skb, struct id_table *table, int initial_participant, int final_participant)
 {
 	int participant;
 	struct rssi_obs * tmp_rssi_obs;
 	struct pkt_id_and_rssi *tmp_pkt_rssi;
+	struct id_and_count *tmp_id_cnt;
 
-	/* Temporary struct to put senderid, pkt_id and rssi into skb->data*/
-	tmp_pkt_rssi = ( struct pkt_id_and_rssi *) skb->data;
+	/* Temporary struct to put pkt_id and rssi into skb->data*/
+	tmp_pkt_rssi = ( struct pkt_id_and_rssi*) skb->data;
 
 	for (participant = initial_participant; participant <= final_participant; participant++)
 	{
+		tmp_id_cnt = ( struct id_and_count *)tmp_pkt_rssi;
+
+		/* storing the client id and count*/
+		tmp_id_cnt->id = table->ids[participant]->id;
+		tmp_id_cnt->rssi_obs_count = table->ids[participant]->rssi_obs_count;
+
+		tmp_id_cnt++;
+
 		tmp_rssi_obs = table->ids[participant]->head;
+		tmp_pkt_rssi = ( struct pkt_id_and_rssi *)tmp_id_cnt; 
+
 		while (tmp_rssi_obs)
 		{
-			/* storing information for one packet - senderid, pkt_id and rssi*/
-			tmp_pkt_rssi->id = table->ids[participant]->id;
+			/* storing information for one packet - pkt_id and rssi*/
 			tmp_pkt_rssi->pkt_id = tmp_rssi_obs->pkt_id;
 			tmp_pkt_rssi->rssi = tmp_rssi_obs->rssi;
 
@@ -96,19 +210,13 @@ void insert_rsst_data(struct sk_buff *skb, struct id_table *table, int initial_p
 	}
 }
 
-struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *state)
+struct sk_buff * create_rsst_pkt(struct rnd_info *rnd, struct create_rsst_st *state)
 {
 	int initial_participant = 0, final_participant;
 	struct sk_buff *skb ;
-	struct net_device *mason_dev;
 	struct pkt_size_info required_pkt_size;
+	struct id_table *table = rnd->tbl;
 
-	mason_dev = dev_get_by_name(&init_net, DEV_NAME);
-	if (!mason_dev) {
-	  printk(KERN_ERR "Failed to find net_device for Mason Rate Test\n");
-	  return NULL;
-	}
-	
 	if (table == NULL )
 	{	
 		printk(KERN_ERR "id table is null\n");
@@ -124,31 +232,20 @@ struct sk_buff * create_rsst_pkt(struct id_table *table, struct create_rsst_st *
 
 	required_pkt_size = get_required_pkt_size_info(table, initial_participant);
 	final_participant = required_pkt_size.final_participant;
-	
+
 	if (final_participant < initial_participant)
 	{
 		printk(KERN_ERR "Maximum allowed packet size is not sufficient\n");
 		return NULL;
 	}
-	
 
-	skb = alloc_skb( (required_pkt_size.pkt_size) + LL_ALLOCATED_SPACE(mason_dev),GFP_KERNEL);
-  
-	if (!skb) 
-	{
-    		printk(KERN_ERR "Failed to allocate skbuff for Mason RT msg");
-		return NULL; 
-  	}
-    
+	/* creating a new skbuff using 'create_mason_packet' in mason.c */
+	//Need to be uncommented when including mason.c
+	//skb = create_mason_packet(rnd, required_pkt_size.pkt_size);
 
-	skb->dev = mason_dev;
-  
-	skb_reserve(skb, LL_RESERVED_SPACE(mason_dev));  /* reserve for L2 header */
-	skb_reset_network_header(skb);  
-  
-	// place the rsst data
+	/* place the rsst data */
 	skb_put(skb, required_pkt_size.pkt_size);
-	
+
 	insert_rsst_data(skb, table, initial_participant, final_participant);
 
 	state->start_participant = final_participant + 1;
