@@ -194,9 +194,10 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
 static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
-static struct sk_buff *create_mason_parlist(struct rnd_info *rnd);
+static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id);
 static struct sk_buff *create_mason_next_txreq(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
+static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 
 #endif /* _MASON_H */
 

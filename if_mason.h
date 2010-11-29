@@ -36,7 +36,6 @@
 #define MASON_ABORT   0x7
 
 /* header for all mason packets */
-#define MASON_HDR_LEN 1
 struct masonhdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
   __u8 sig:1,
@@ -72,7 +71,8 @@ struct par_masonpkt {
 
 /* participant list packet */
 struct parlist_masonpkt {
-  __be16 len;
+  __be16 start_id; /* ID assigned to the first key in the packet */
+  __be16 count; /* Number of keys in this packet */
 } __attribute__((__packed__));
 
 /* transmit request packet */
@@ -117,7 +117,7 @@ static inline void *mason_typehdr(const struct sk_buff *skb)
   return mason_hdr(skb) + 1;
 }
 
-static struct masontail *mason_tail(const struct sk_buff *skb);
+extern struct masontail *mason_tail(const struct sk_buff *skb);
 
 
 

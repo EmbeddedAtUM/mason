@@ -101,20 +101,55 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
   return ret;
 }
 
-static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
-  enum fsm_state ret;
+static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
+{
   struct masonhdr *hdr;
-  struct parlist_masonpkt *parlisthdr;
-  struct txreq_masonpkt *txreqhdr;
+  struct parlist_masonpkt *typehdr;
+  unsigned int i, count, start_id;
+  __u8 *data;
+
+  hdr = mason_hdr(skb);
+  if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt))) {
+    printk(KERN_INFO "Received PARLIST message without parlist header\n");
+    return;
+  }
+  typehdr = (struct parlist_masonpkt*) mason_typehdr(skb);  
+  skb_pull(skb, sizeof(struct parlist_masonpkt));
+  
+  /* Verify the values in the parlist header are reasonable */
+  count = ntohs(typehdr->count);
+  start_id = ntohs(typehdr->start_id);
+
+  if (!pskb_may_pull(skb, count * RSA_LEN)) {
+    printk(KERN_INFO "Received PARLIST message claiming more data than available\n");
+    return;
+  }
+  if (start_id > MAX_PARTICIPANTS)
+    return;
+  
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Received PARLIST message\n");
+#endif
+
+  data = (__u8 *)(typehdr+1);
+  for(i = start_id; i < count + start_id; ++i) {
+    add_identity(rnd, i, data);
+    data += RSA_LEN;
+  }
+}
+
+static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
+  struct masonhdr *hdr;
+  //struct txreq_masonpkt *txreqhdr;
 
   hdr = mason_hdr(skb);
   switch (hdr->type) {
   case MASON_PARLIST:
-    if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt)))
-      goto out;
-    /* TODO: Handle the PARLIST packet */
+    del_fsm_timer(&rnd->timer);
+    import_mason_parlist(rnd, skb);
     goto out;
   case MASON_TXREQ:
+    del_fsm_timer(&rnd->timer);
     if (!pskb_may_pull(skb, sizeof(struct txreq_masonpkt)))
       goto out;
     /* TODO: Handle the TXREQ packet */
@@ -127,6 +162,7 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
 
  out:
   kfree_skb(skb);
+  mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
   return fsm_c_parlist; 
 
  abort:
@@ -217,13 +253,14 @@ static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 {
   struct sk_buff *reply;
+  unsigned int cur_id = 1;
 
 #ifdef MASON_DEBUG
   printk(KERN_DEBUG "Mason Protocol initiator timed out waiting for PAR packets.\n");
 #endif
 
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
-    while (NULL != (reply = create_mason_parlist(rnd))) {
+    while (NULL != (reply = create_mason_parlist(rnd, &cur_id))) {
 #ifdef MASON_DEBUG
       printk(KERN_DEBUG "Sending Mason PARLIST packet\n");
 #endif
@@ -241,7 +278,7 @@ static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 #ifdef MASON_DEBUG
       printk(KERN_DEBUG "Unable to create Mason MEAS packet.  Aborting round\n");
 #endif
-      goto abort;
+      goto out;
     }
   }
   else {
@@ -318,7 +355,9 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   rnd->pkt_id = 0;
   get_random_bytes(&rnd->rnd_id, sizeof(rnd->rnd_id));
   get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
-
+  dev_hold(mason_dev);
+  rnd->dev = mason_dev;
+  
   /* Create the packet */
   skb = create_mason_init(rnd);
   if (!skb)
@@ -497,7 +536,7 @@ static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd)
  * packet header indicates that one is included. Otherwise, returns
  * NULL.
  */
-static struct masontail *mason_tail(const struct sk_buff *skb)
+extern struct masontail *mason_tail(const struct sk_buff *skb)
 {
   struct masonhdr *hdr = mason_hdr(skb);
   void *typehdr = mason_typehdr(skb);
@@ -511,7 +550,7 @@ static struct masontail *mason_tail(const struct sk_buff *skb)
       return typehdr + sizeof(struct par_masonpkt);
     case MASON_PARLIST:
       return typehdr + sizeof(struct parlist_masonpkt) + 
-	((struct parlist_masonpkt *)typehdr)->len;
+	((struct parlist_masonpkt *)typehdr)->count * RSA_LEN;
     case MASON_TXREQ:
       return typehdr + sizeof(struct txreq_masonpkt);
     case MASON_MEAS:
@@ -627,20 +666,79 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   return skb;
 }
 
-static struct sk_buff *create_mason_parlist(struct rnd_info *rnd)
-{
+/*
+ * Creates a parlist packet containing the RSA keys of the
+ * participants in sequential order by id.  Stops when the packet is
+ * full or the last participant has been added.
+ *
+ * [masonhdr][start_id][count][pub_key][pub_key][pub_key][pub_key]...
+ *
+ * @start_id pointer to an integer indicating the id with which to
+ * begin.  If the packet is filled before all identities have been
+ * used, this integer is changed to the first id not included.  The
+ * function can thus be called again, to create a packet with the
+ * remaining identities.
+ *
+ * @return the sk_buff containing the packet. NULL if no participants
+ * remain or an allocation error occurred.
+ */
+static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id)
+{  
   struct sk_buff *skb;
   struct masonhdr *hdr;
+  struct parlist_masonpkt *typehdr;
+  unsigned int num_ids, i;
+  __u8 *data;
 
-  /* TODO: Implement this function */
+  /* Exit if no more ids to send */
+  if (*start_id > rnd->tbl->max_id)
+    return NULL;
+  
+  /* Determine number of ids to include in packet */
+  num_ids = min(rnd->tbl->max_id - *start_id + 1, 
+		(rnd->dev->mtu - sizeof(struct masonhdr) - sizeof(struct parlist_masonpkt)) / RSA_LEN);
 
-  return NULL;
+  /* Build the packet */
+  skb = create_mason_packet(rnd, sizeof(struct parlist_masonpkt) + num_ids * RSA_LEN);
+  if (!skb)
+    goto out;
+
+  /* Set the type in the header */
+  hdr = mason_hdr(skb);
+  hdr->type = MASON_PARLIST;
+
+  /* Set the type-specific data */
+  typehdr = (struct parlist_masonpkt *)mason_typehdr(skb);
+  skb_put(skb, sizeof(struct parlist_masonpkt));
+  typehdr->start_id = htons(*start_id);
+  typehdr->count = htons(num_ids);
+  
+  data = (__u8 *)(typehdr + 1);
+  for (i = *start_id; i < num_ids + *start_id; ++i) {
+    skb_put(skb, RSA_LEN);
+    memcpy(data, rnd->tbl->ids[i]->pub_key, RSA_LEN);
+    data += RSA_LEN; 
+  }
+  
+  /* Set the LL header */
+  if (0 > dev_hard_header(skb, skb->dev, ntohs(skb->protocol), skb->dev->broadcast, NULL, skb->len)) {
+    printk(KERN_ERR "Failed to set device hard header on Mason Protocol packet\n");
+    kfree_skb(skb);
+    skb = NULL;
+  }
+  
+  *start_id += num_ids; /* Set this after we have confirmed the call
+			   to dev_hard_header worked and we know we
+			   will return a valid skb */
+  
+ out:
+  return skb;
 }
 
 static struct sk_buff *create_mason_next_txreq(struct rnd_info *rnd)
 {
-  struct sk_buff *skb;
-  struct masonhdr *hdr;
+  //struct sk_buff *skb;
+  // struct masonhdr *hdr;
 
   /* TODO: Implement this function */
 
@@ -809,6 +907,14 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
   id->head = NULL;
   id->hwaddr = NULL;
+
+  /* If this is our identity, record the number assigned by the initiator */
+  if (0 == memcmp(rnd->pub_key, id->pub_key, RSA_LEN)) {
+    rnd->my_id = sender_id;
+#ifdef MASON_DEBUG
+    printk(KERN_DEBUG "My ID assigned by initiator is %u\n", sender_id);
+#endif
+  }  
 
 #ifdef MASON_DEBUG
   printk(KERN_DEBUG "Added Mason Identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...\n", 
