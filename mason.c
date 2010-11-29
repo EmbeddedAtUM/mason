@@ -102,7 +102,40 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
 }
 
 static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
-  return fsm_idle; /* TODO: Implement this handler */
+  enum fsm_state ret;
+  struct masonhdr *hdr;
+  struct parlist_masonpkt *parlisthdr;
+  struct txreq_masonpkt *txreqhdr;
+
+  hdr = mason_hdr(skb);
+  switch (hdr->type) {
+  case MASON_PARLIST:
+    if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt)))
+      goto out;
+    /* TODO: Handle the PARLIST packet */
+    goto out;
+  case MASON_TXREQ:
+    if (!pskb_may_pull(skb, sizeof(struct txreq_masonpkt)))
+      goto out;
+    /* TODO: Handle the TXREQ packet */
+    goto out;
+  case MASON_ABORT:
+    goto abort;
+  default:
+    goto out;
+  }
+
+ out:
+  kfree_skb(skb);
+  return fsm_c_parlist; 
+
+ abort:
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Mason Protocol client received ABORT message.  Aborting\n");
+#endif
+  reset_rnd_info(rnd);
+  kfree_skb(skb);
+  return fsm_idle;
 }
 
 static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *skb)
@@ -119,6 +152,7 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
 {
   struct masonhdr *hdr;
   struct par_masonpkt *typehdr;
+  struct sk_buff *reply;
 
   hdr = mason_hdr(skb);
   switch (hdr->type) {
@@ -126,19 +160,33 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
     if (!pskb_may_pull(skb, sizeof(*typehdr))) 
       goto out;
     typehdr = mason_typehdr(skb);
-    
+    if (rnd->tbl->max_id < MAX_PARTICIPANTS) {
 #ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Received PAR message\n");
+      printk(KERN_DEBUG "Received PAR message. Adding identity\n");
 #endif
-    add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
-    goto out;
+      add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key);
+      goto out;
+    } else {
+#ifdef MASON_DEBUG
+      printk(KERN_DEBUG "Received PAR message.  Participant limit exceeded.  Aborting\n");
+#endif
+      reply = create_mason_abort(rnd);
+      if (reply)
+	dev_queue_xmit(reply);
+      reset_rnd_info(rnd);
+      goto abort;
+    }
   default:
     goto out;
   }
-
-  out:
-    kfree_skb(skb);
-    return fsm_s_par; 
+  
+ out:
+  kfree_skb(skb);
+  return fsm_s_par; 
+  
+ abort:
+  kfree_skb(skb);
+  return fsm_idle;
 }
 
 static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb)
@@ -168,7 +216,51 @@ static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 {
-  return fsm_idle; /* TODO: Implement this handler */
+  struct sk_buff *reply;
+
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Mason Protocol initiator timed out waiting for PAR packets.\n");
+#endif
+
+  if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
+    while (NULL != (reply = create_mason_parlist(rnd))) {
+#ifdef MASON_DEBUG
+      printk(KERN_DEBUG "Sending Mason PARLIST packet\n");
+#endif
+      dev_queue_xmit(reply);
+    }
+    reply = create_mason_next_txreq(rnd);
+    if (reply) {
+#ifdef MASON_DEBUG
+      printk(KERN_DEBUG "Sending Mason MEAS packet\n");
+#endif
+      dev_queue_xmit(reply);
+      mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
+      goto out;
+    } else {
+#ifdef MASON_DEBUG
+      printk(KERN_DEBUG "Unable to create Mason MEAS packet.  Aborting round\n");
+#endif
+      goto abort;
+    }
+  }
+  else {
+#ifdef MASON_DEBUG
+    printk(KERN_DEBUG "Not enough participants.  Aborting round\n");
+#endif
+    goto abort;
+  }
+
+
+ out:
+  return fsm_s_meas;
+  
+ abort:
+  reply = create_mason_abort(rnd);
+  if (reply)
+    dev_queue_xmit(reply);
+  reset_rnd_info(rnd);
+  return fsm_idle; 
 }
 
 static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data)
@@ -236,6 +328,7 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   printk(KERN_DEBUG "Sending Mason INIT message\n");
 #endif
   dev_queue_xmit(skb);
+  mod_fsm_timer(&rnd->timer, PAR_TIMEOUT);
   return fsm_s_par;
 }
 
@@ -510,7 +603,7 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   struct masonhdr *hdr;
   struct init_masonpkt *typehdr;
 
-  skb = create_mason_packet(rnd, sizeof(struct init_masonpkt));
+  skb = create_mason_packet(rnd, sizeof(*typehdr));
   if (!skb)
     goto out;
 
@@ -534,6 +627,49 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
   return skb;
 }
 
+static struct sk_buff *create_mason_parlist(struct rnd_info *rnd)
+{
+  struct sk_buff *skb;
+  struct masonhdr *hdr;
+
+  /* TODO: Implement this function */
+
+  return NULL;
+}
+
+static struct sk_buff *create_mason_next_txreq(struct rnd_info *rnd)
+{
+  struct sk_buff *skb;
+  struct masonhdr *hdr;
+
+  /* TODO: Implement this function */
+
+  return NULL;
+}
+
+static struct sk_buff *create_mason_abort(struct rnd_info *rnd)
+{
+  struct sk_buff *skb;
+  struct masonhdr *hdr;
+
+  skb = create_mason_packet(rnd, 0);
+  if (!skb)
+    goto out;
+  
+  /* Set the type in the header */
+  hdr = mason_hdr(skb);
+  hdr->type = MASON_ABORT;
+
+  /* Set the LL header */
+  if (0 > dev_hard_header(skb, skb->dev, ntohs(skb->protocol), skb->dev->broadcast, NULL, skb->len)) {
+    printk(KERN_ERR "Failed to set device hard header on Mason Protocol packet\n");
+    kfree_skb(skb);
+    skb = NULL;
+  }
+
+ out:
+  return skb;
+}
 
 /* **************************************************************
  *                  Round Info utility functions
@@ -703,6 +839,12 @@ int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *p
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
     printk(KERN_ERR "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
+    goto free_skb;
+  }
+
+  /* Verify the round number */
+  if (cur_fsm->rnd && (cur_fsm->rnd->rnd_id != 0) && (cur_fsm->rnd->rnd_id != ntohl(hdr->rnd_id)) ) {
+    printk(KERN_INFO "Dropping packet with differing round id: %u != %u\n", cur_fsm->rnd->rnd_id, ntohl(hdr->rnd_id));
     goto free_skb;
   }
 
