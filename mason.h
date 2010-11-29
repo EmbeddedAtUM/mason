@@ -16,6 +16,11 @@
 #define MAX_PARTICIPANTS 400
 #define DEV_NAME "tiwlan0"
 
+#define CLIENT_TIMEOUT 500
+#define PAR_TIMEOUT 100
+#define MEAS_TIMEOUT 30
+#define RSST_TIMEOUT 100
+
 /* **************************************************************
  *    State Machine Declarations
  * ************************************************************** */
@@ -78,9 +83,7 @@ static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *sk
 static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *skb);
 
 static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_c_parlist_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_c_txreq_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_c_rsstreq_timeout(struct rnd_info *rnd, long data);
+static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_rsst_timeout(struct rnd_info *rnd, long data);
@@ -94,6 +97,40 @@ static enum fsm_state fsm_s_meas_quit(struct rnd_info *rnd);
 static enum fsm_state fsm_s_rsst_quit(struct rnd_info *rnd);
 
 static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd);
+
+/* **************************************************************
+ * Timers
+ * ************************************************************** */
+struct rnd_info;
+struct fsm_timer {
+  struct timer_list tl;
+  unsigned long idx;
+  unsigned long expired_idx; /* When the timer expires, this is set to
+				idx.  If the timer is re-added before
+				the fsm_input corresponding to the
+				expiry is processed, then, at the time
+				of processing, idx > expired_idx.  If
+				idx==expired_idx, the timer has not
+				been reset.  In most cases, if idx >
+				expired_idx, then the timeout should
+				be ignored. */
+  struct rnd_info *rnd;
+  
+};
+
+static void fsm_timer_callback(unsigned long data);
+static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd);
+
+static inline void mod_fsm_timer(struct fsm_timer *timer, unsigned long msec)
+{
+  ++timer->idx;
+  mod_timer(&timer->tl, jiffies + msecs_to_jiffies(msec));
+}
+
+static inline void del_fsm_timer(struct fsm_timer *timer)
+{
+  del_timer(&timer->tl);
+}
 
 /* **************************************************************
  * Round data
@@ -132,6 +169,11 @@ struct rnd_info {
   __u8 pub_key[RSA_LEN];
   struct net_device *dev;
   struct id_table *tbl;
+  struct fsm_timer timer;
+  struct fsm *fsm; /* Ideally this back reference would not be
+		      necessary.  It can probably be removed if a
+		      global mapping between round ID and fsm is
+		      maintained. */
 };
 
 static struct rnd_info *new_rnd_info(void);

@@ -84,6 +84,7 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
     printk(KERN_DEBUG "Sending Mason PAR message in reply to INIT\n");
 #endif
     dev_queue_xmit(reply);
+    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_parlist;
     goto out;
   default:
@@ -152,22 +153,17 @@ static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *sk
 
 static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data)
 {
-  return fsm_idle; /* TODO: Implement this handler */
+  printk(KERN_ERR "Mason Protocol FSM received timeout in idle state. This should not occur\n");
+  return fsm_idle; /* We're already in idle, so ignore any errant timeouts */
 }
 
-static enum fsm_state fsm_c_parlist_timeout(struct rnd_info *rnd, long data)
+static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 {
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_c_txreq_timeout(struct rnd_info *rnd, long data)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_c_rsstreq_timeout(struct rnd_info *rnd, long data)
-{
-  return fsm_idle; /* TODO: Implement this handler */
+#ifdef MASON_DEBUG
+  printk(KERN_DEBUG "Mason Protocol client timed out waiting for packets\n");
+#endif
+  reset_rnd_info(rnd);
+  return fsm_idle;  
 }
 
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
@@ -260,9 +256,9 @@ static enum fsm_state (*fsm_packet_trans[])(struct rnd_info *, struct sk_buff *)
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_timeout_trans[])(struct rnd_info *, long)  = {
   &fsm_idle_timeout,
-  &fsm_c_parlist_timeout,
-  &fsm_c_txreq_timeout,
-  &fsm_c_rsstreq_timeout,
+  &fsm_client_timeout,
+  &fsm_client_timeout,
+  &fsm_client_timeout,
   &fsm_s_par_timeout,
   &fsm_s_meas_timeout,
   &fsm_s_rsst_timeout,
@@ -292,13 +288,16 @@ static enum fsm_state (*fsm_initiate_trans[])(struct rnd_info *) = {
 
 static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
 {
+  struct fsm_timer *timer;
+
   switch (input->type) {
   case fsm_packet :
     if (fsm_packet_trans[fsm->cur_state])
       fsm->cur_state = fsm_packet_trans[fsm->cur_state](fsm->rnd, input->data.skb);
     break;
   case fsm_timeout :
-    if (fsm_timeout_trans[fsm->cur_state])
+    timer = (struct fsm_timer *) input->data.data;
+    if ( (timer->idx == timer->expired_idx) && fsm_timeout_trans[fsm->cur_state])
       fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm->rnd, input->data.data);
     break;
   case fsm_quit :
@@ -341,8 +340,10 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
   if (!fsm )
     goto out;
 
-  if (!fsm->rnd)
+  if (!fsm->rnd) {
     fsm->rnd = new_rnd_info();
+    fsm->rnd->fsm = fsm;
+  }
 
   rc = down_trylock(&fsm->sem);
   if (0 == rc) {
@@ -369,6 +370,31 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
   return rc;
 }
 
+/* **************************************************************
+ * Timers
+ * ************************************************************** */
+static void fsm_timer_callback(unsigned long data) 
+{
+  struct fsm_timer *timer = (struct fsm_timer *) data;
+  struct fsm_input *input;
+
+  timer->expired_idx = timer->idx;
+
+  input = kzalloc(sizeof(*input), GFP_ATOMIC);
+  if (!input)
+    return;
+  input->type = fsm_timeout;
+  input->data.data = data;
+  fsm_dispatch_interrupt(timer->rnd->fsm, input);
+}
+
+static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd)
+{
+  timer->rnd = rnd;
+  timer->idx = 1;
+  timer->expired_idx = 0;
+  setup_timer(&timer->tl, fsm_timer_callback, (unsigned long) timer);
+}
 
 /* **************************************************************
  *            Mason packet utility functions
@@ -518,12 +544,13 @@ static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
     return NULL;
 
   ptr->rnd_id = 0;
+  init_fsm_timer(&ptr->timer, ptr);
   ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_ATOMIC);
   if (!ptr->tbl) {
     kfree(ptr);
     ptr = NULL;
   }
-  
+
   return ptr;
 }
 
@@ -549,7 +576,7 @@ static struct rnd_info *reset_rnd_info(struct rnd_info *ptr)
     dev_put(ptr->dev);
     ptr->dev = NULL;
   }
-    
+  del_fsm_timer(&ptr->timer);    
   if (ptr->tbl)
     free_id_table(ptr->tbl);
 
@@ -563,7 +590,7 @@ static void free_rnd_info(struct rnd_info *ptr)
 
   if (ptr->dev)
     dev_put(ptr->dev);
-  
+  del_fsm_timer(&ptr->timer);
   if (ptr->tbl)
     free_id_table(ptr->tbl);
   
