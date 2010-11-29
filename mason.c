@@ -290,79 +290,85 @@ static enum fsm_state (*fsm_initiate_trans[])(struct rnd_info *) = {
   NULL,
 };
 
-static int fsm_dispatch_timeout(struct fsm *fsm, long data)
+static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
 {
-  int rc = 0;
-  unsigned long flags;
-
-  if (!fsm || !fsm->rnd)
-    return 0;
-  
-  spin_lock_irqsave(&fsm->lock, flags);
-  if (0 == rc) {
-    if (fsm_timeout_trans[fsm->cur_state])
-      fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm->rnd, data);
-    spin_unlock_irqrestore(&fsm->lock, flags);
-  }
-  return rc;
-}
-
-static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb)
-{
-  int rc = 0;
-  unsigned long flags;
-
-  if (!fsm)
-    return 0;
-
-  if (!fsm->rnd)
-    fsm->rnd  = new_rnd_info();
-
-  spin_lock_irqsave(&fsm->lock, flags);
-  if (0 == rc) {
+  switch (input->type) {
+  case fsm_packet :
     if (fsm_packet_trans[fsm->cur_state])
-      fsm->cur_state = fsm_packet_trans[fsm->cur_state](fsm->rnd, skb);
-    spin_unlock_irqrestore(&fsm->lock, flags);
-  }
-  return rc;
-}
-
-static int fsm_dispatch_quit(struct fsm *fsm)
-{
-  int rc = 0;
-  unsigned long flags;
-
-  if (!fsm)
-    return 0;
-
-  spin_lock_irqsave(&fsm->lock, flags);
-  if (0 == rc) {
+      fsm->cur_state = fsm_packet_trans[fsm->cur_state](fsm->rnd, input->data.skb);
+    break;
+  case fsm_timeout :
+    if (fsm_timeout_trans[fsm->cur_state])
+      fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm->rnd, input->data.data);
+    break;
+  case fsm_quit :
     if (fsm_quit_trans[fsm->cur_state])
       fsm->cur_state = fsm_quit_trans[fsm->cur_state](fsm->rnd);
-    spin_unlock_irqrestore(&fsm->lock, flags);
+    break;
+  case fsm_initiate :
+    if (fsm_initiate_trans[fsm->cur_state])
+      fsm->cur_state = fsm_initiate_trans[fsm->cur_state](fsm->rnd);
+    break;
+  default:
+    printk(KERN_ERR "Invalid Mason Protocol FSM input type received\n");
+    break;
   }
-  return rc;
 }
 
-static int fsm_dispatch_initiate(struct fsm *fsm)
+static void fsm_dispatch_process(struct work_struct *work)
+{
+  struct fsm_dispatch *dis = container_of(work, struct fsm_dispatch, work);
+  struct fsm *fsm = dis->fsm;
+
+  if (!fsm || !fsm->rnd)
+    goto out;
+
+  if (0 == down_interruptible(&fsm->sem)) {
+    __fsm_dispatch(fsm, dis->input);
+    up(&fsm->sem);
+  }
+  
+ out:
+  kfree(dis->input);
+  kfree(dis);
+}
+
+static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
 {
   int rc = 0;
-  unsigned long flags;
+  struct fsm_dispatch *dis;
 
-  if (!fsm)
-    return 0;
+  if (!fsm )
+    goto out;
 
   if (!fsm->rnd)
     fsm->rnd = new_rnd_info();
 
-  spin_lock_irqsave(&fsm->lock, flags);
+  rc = down_trylock(&fsm->sem);
   if (0 == rc) {
-    if (fsm_initiate_trans[fsm->cur_state])
-      fsm->cur_state = fsm_initiate_trans[fsm->cur_state](fsm->rnd);
-    spin_unlock_irqrestore(&fsm->lock, flags);
+    __fsm_dispatch(fsm, input);
+    up(&fsm->sem);
+  } else {
+    dis = kmalloc(sizeof(*dis), GFP_ATOMIC);
+    if (unlikely(!dis)) {
+      rc = -ENOMEM;
+      goto free_input;
+    }
+    
+    dis->fsm = fsm;
+    dis->input = input;
+    INIT_WORK(&dis->work, fsm_dispatch_process);
+    schedule_work(&dis->work);
+    goto out;
   }
+
+ free_input:
+  kfree(input);
+  
+ out:
   return rc;
 }
+
 
 /* **************************************************************
  *            Mason packet utility functions
@@ -642,7 +648,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   id->hwaddr = NULL;
 
 #ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Added Mason Identity: rnd:%d sender_id:%d pub_key:%x%x%x%x...\n", 
+  printk(KERN_DEBUG "Added Mason Identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...\n", 
 	 rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
 #endif  
 
@@ -653,32 +659,38 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
  *                   Network functions
  * ************************************************************** */
 int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev) {
+  struct fsm_input *input;
   struct masonhdr *hdr;
   int rc = 0;
   
   /* Drop packet if not addressed to us */
   if (skb->pkt_type == PACKET_OTHERHOST)
-    goto out;
+    goto free_skb;
 
   /* Verify the version */
   if (!pskb_may_pull(skb, sizeof(struct masonhdr)))
-    goto out;
+    goto free_skb;
 
   skb_reset_network_header(skb);  
   skb_pull(skb, sizeof(struct masonhdr));
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
     printk(KERN_ERR "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
-    goto out;
+    goto free_skb;
   }
 
 #ifdef MASON_DEBUG
   printk(KERN_DEBUG "Dispatching Mason protocol packet\n");
 #endif
-  fsm_dispatch_packet(cur_fsm, skb);
+  input = kmalloc(sizeof(*input), GFP_ATOMIC);
+  if (!input)
+    goto free_skb;
+  input->type = fsm_packet;
+  input->data.skb = skb;
+  fsm_dispatch_interrupt(cur_fsm, input);
   return rc;
   
- out:
+ free_skb:
   kfree_skb(skb);
   return rc;
 }
@@ -694,6 +706,8 @@ static struct packet_type mason_packet_type = {
  * ************************************************************** */
 static int __init mason_init(void)
 {
+  struct fsm_input *input;
+  
   printk(KERN_INFO "Loading Mason Protocol Module\n");
   mason_dev = dev_get_by_name(&init_net, DEV_NAME); /* TODO: Find the
 						       device by
@@ -721,10 +735,15 @@ static int __init mason_init(void)
   dev_add_pack(&mason_packet_type);
 
   if (1 == init) {
-    //msleep(1500);
-    fsm_dispatch_initiate(cur_fsm);
+    msleep(1500);
+    input = kzalloc(sizeof(*input), GFP_ATOMIC);
+    if (!input)
+      goto out;
+    input->type = fsm_initiate;
+    fsm_dispatch_interrupt(cur_fsm, input);
   }
   
+ out:
   return 0;
 }
 

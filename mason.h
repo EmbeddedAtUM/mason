@@ -30,35 +30,44 @@ enum fsm_state {
   fsm_terminal  = 255,
 };
 
-/*
- * This enum is not used, but is left here to show the
- * types of inputs used.
-enum fsm_input {
+enum fsm_input_type {
   fsm_packet  = 0,
   fsm_timeout = 1,
   fsm_quit    = 2,
   fsm_initiate = 3
 };
-*/
 
 struct rnd_info;
 struct fsm {
-  spinlock_t lock;
+  struct semaphore sem;
   enum fsm_state cur_state;
   struct rnd_info *rnd;
+};
+
+struct fsm_input {
+  enum fsm_input_type type;
+  union {
+    long data;
+    struct sk_buff *skb;} data;
+};
+
+struct fsm_dispatch {
+  struct work_struct work;
+  struct fsm *fsm;
+  struct fsm_input *input;
 };
 
 static struct fsm *new_fsm(void);
 static void free_fsm(struct fsm *ptr);
 
 static inline void fsm_init(struct fsm *fsm) {
-  fsm->lock = SPIN_LOCK_UNLOCKED;
+  sema_init(&fsm->sem, 1);
   fsm->cur_state = fsm_idle;
-}
+};
 
-static int fsm_dispatch_timeout(struct fsm *fsm, long data);
-static int fsm_dispatch_packet(struct fsm *fsm, struct sk_buff *skb);
-static int fsm_dispatch_quit(struct fsm *fsm);
+static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
+static void fsm_dispatch_process(struct work_struct *work);
+static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input);
 
 static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb);
