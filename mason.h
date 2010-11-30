@@ -195,6 +195,8 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
  *              Mason Packet utility functions
  * ************************************************************** */
 static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short type, int len);
+static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr);
+static int bcast_mason_packet(struct sk_buff *skb);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id);
@@ -202,8 +204,8 @@ static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
 
-static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 
+static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 
 static __u16 select_next_txreq_id(struct rnd_info *rnd);
 

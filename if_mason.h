@@ -35,6 +35,17 @@
 #define MASON_RSST    0x6
 #define MASON_ABORT   0x7
 
+static const char* MASON_TYPES[] = {
+  "INIT",
+  "PAR",
+  "PARLIST",
+  "TXREQ",
+  "MEAS",
+  "RSSTREQ",
+  "RSST",
+  "ABORT",
+};
+
 /* header for all mason packets */
 struct masonhdr {
 #if defined(__LITTLE_ENDIAN_BITFIELD)
@@ -57,6 +68,15 @@ struct masonhdr {
 static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
 {
   return (struct masonhdr *)skb_network_header(skb);
+}
+
+static inline unsigned short mason_type(const struct sk_buff *skb)
+{
+  return mason_hdr(skb)->type;
+}
+
+static inline const char* mason_type_str(const struct sk_buff *skb){
+  return MASON_TYPES[mason_type(skb)];
 }
 
 /* initiate packet */
@@ -117,7 +137,6 @@ static inline void *mason_typehdr(const struct sk_buff *skb)
 }
 
 extern struct masontail *mason_tail(const struct sk_buff *skb);
-
 
 
 #endif /* _IF_MASON_H */
