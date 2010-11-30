@@ -62,10 +62,8 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
     if (!hwaddr || !dev_parse_header(skb, hwaddr) 
 	|| (0 > add_identity(rnd, ntohs(hdr->sender_id), typehdr->pub_key, hwaddr)))
       goto err;
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Mason initiator hwaddr:%x:%x:%x:%x:%x:%x\n",
-	   hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
-#endif
+    mason_logd("initiator hwaddr:%x:%x:%x:%x:%x:%x",
+	       hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
     get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));       /* Set the public key */
     if (0 != send_mason_packet(create_mason_par(rnd), hwaddr))  /* Send PAR message */
       goto err;
@@ -97,7 +95,7 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 
   hdr = mason_hdr(skb);
   if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt))) {
-    printk(KERN_INFO "Received PARLIST message without parlist header\n");
+    mason_loge("PARLIST packet is too short");
     return;
   }
   typehdr = (struct parlist_masonpkt*) mason_typehdr(skb);  
@@ -108,16 +106,12 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   start_id = ntohs(typehdr->start_id);
 
   if (!pskb_may_pull(skb, count * RSA_LEN)) {
-    printk(KERN_INFO "Received PARLIST message claiming more data than available\n");
+    mason_logd("PARLIST packet claims more data than available");
     return;
   }
   if (start_id > MAX_PARTICIPANTS)
     return;
   
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Received PARLIST message\n");
-#endif
-
   data = (__u8 *)(typehdr+1);
   for(i = start_id; i < count + start_id; ++i) {
     add_identity(rnd, i, data, NULL);
@@ -147,9 +141,6 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
     ret = fsm_c_parlist;
     goto out;
   case MASON_TXREQ:
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Received TXREQ message\n");
-#endif
     del_fsm_timer(&rnd->timer);
     typehdr = (struct txreq_masonpkt *)mason_typehdr(skb);
     if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
@@ -166,9 +157,7 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
   }
 
  abort:
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Mason Protocol client received ABORT message.  Aborting\n");
-#endif
+  mason_logd("aborting");
   reset_rnd_info(rnd);
   ret = fsm_idle;
   
@@ -186,9 +175,6 @@ static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *s
   hdr = mason_hdr(skb);
   switch(hdr->type) {
   case MASON_TXREQ:
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Received TXREQ message\n");
-#endif
     del_fsm_timer(&rnd->timer);
     typehdr = (struct txreq_masonpkt *)mason_typehdr(skb);
     if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
@@ -198,9 +184,6 @@ static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *s
     ret = fsm_c_txreq;
     goto out;
   case MASON_MEAS:
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Received MEAS mesage\n");
-#endif
     del_fsm_timer(&rnd->timer);
     record_new_obs(rnd->tbl, ntohs(hdr->sender_id), ntohs(hdr->pkt_uid), hdr->rssi);
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
@@ -214,9 +197,7 @@ static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *s
   }
   
  abort:
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Mason Protocol client received ABORT message.  Aborting\n");
-#endif
+  mason_logd("aborting");
   reset_rnd_info(rnd);
   ret = fsm_idle;
   
@@ -243,18 +224,13 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
       goto out;
     typehdr = mason_typehdr(skb);
     if (rnd->tbl->max_id < MAX_PARTICIPANTS) {
-#ifdef MASON_DEBUG
-      printk(KERN_DEBUG "Received PAR message. Adding identity\n");
-#endif
       hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
       if (!hwaddr || !dev_parse_header(skb, hwaddr) 
 	  || (0 > add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key, hwaddr)))
 	goto abort;
       goto out;
     } else {
-#ifdef MASON_DEBUG
-      printk(KERN_DEBUG "Received PAR message.  Participant limit exceeded.  Aborting\n");
-#endif
+      mason_logd("participant limit exceeded.  aborting");
       goto abort;
     }
   default:
@@ -266,6 +242,7 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
   return fsm_s_par; 
   
  abort:
+  mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   reset_rnd_info(rnd);
   if (hwaddr)
@@ -308,6 +285,7 @@ static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *sk
   }
 
  abort:
+  mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   reset_rnd_info(rnd);
   ret = fsm_idle;
@@ -324,17 +302,16 @@ static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *sk
 
 static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data)
 {
-  printk(KERN_ERR "Mason Protocol FSM received timeout in idle state. This should not occur\n");
+  mason_loge("fsm received timeout input while in idle state. This should not occur");
   return fsm_idle; /* We're already in idle, so ignore any errant timeouts */
 }
 
 static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 {
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Mason Protocol client timed out waiting for packets\n");
-#endif
+  mason_logd("client timed out");
+  mason_logd("aborting");
   reset_rnd_info(rnd);
-  return fsm_idle;  
+  return fsm_idle;
 }
 
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
@@ -342,28 +319,23 @@ static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
   enum fsm_state ret;
   unsigned int cur_id = 1;
 
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Mason Protocol initiator timed out waiting for PAR packets.\n");
-#endif
+  mason_logd("initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
     if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd)))) {
-#ifdef MASON_DEBUG
-      printk(KERN_DEBUG "Unable to send TXREQ.  Aborting round\n");
-#endif
+      mason_loge("failed to send TXREQ packet");
       goto abort;
     }
     mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
     ret = fsm_s_meas;
     goto out;
   } else {
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "Not enough participants.  Aborting round\n");
-#endif
+    mason_logd("not enough participants");
     goto abort;
   }
 
  abort:
+  mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   reset_rnd_info(rnd);
   ret = fsm_idle; 
@@ -374,9 +346,7 @@ static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 
 static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data)
 {
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Failed to receive MEAS packet in time\n");
-#endif
+  mason_logd("initiator timed out while waiting for MEAS packet");
   if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
     if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd)))) 
       goto abort;
@@ -449,7 +419,7 @@ static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
   if (0 != bcast_mason_packet(create_mason_init(rnd)))
     return fsm_idle;
   
-  printk(KERN_DEBUG "Setting PAR_TIMEOUT after initiate\n");
+  mason_logd("setting timer delay to PAR_TIMEOUT");
   mod_fsm_timer(&rnd->timer, PAR_TIMEOUT);
   return fsm_s_par;
 }
@@ -524,7 +494,7 @@ static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
       fsm->cur_state = fsm_initiate_trans[fsm->cur_state](fsm->rnd);
     break;
   default:
-    printk(KERN_ERR "Invalid Mason Protocol FSM input type received\n");
+    mason_loge("invalid fsm input received");
     break;
   }
 }
@@ -646,7 +616,7 @@ extern struct masontail *mason_tail(const struct sk_buff *skb)
     case MASON_ABORT:
       return typehdr + sizeof(struct abort_masonpkt);
     default:
-      printk(KERN_ERR "Invalid Mason packet type received\n");
+      mason_loge("invalid packet type received");
       return NULL;
     }
   }
@@ -667,7 +637,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short 
   
   skb = alloc_skb(LL_ALLOCATED_SPACE(dev) + sizeof(*hdr) + len, GFP_ATOMIC);
   if (!skb) {
-    printk(KERN_ERR "Failed to allocate sk_buff for Mason packet\n");
+    mason_loge("failed to allocate sk_buff");
     return NULL;
   }
 
@@ -814,12 +784,10 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr)
   if (!hwaddr)
     hwaddr = skb->dev->broadcast;
   if (0 > (rc = dev_hard_header(skb, skb->dev, ntohs(skb->protocol), hwaddr, NULL, skb->len))) {
-    printk(KERN_ERR "Failed to set device hard header on Mason Protocol packet\n");
+    mason_loge("failed to set device hard header on sk_buff");
     kfree_skb(skb);
   } else {
-#ifdef MASON_DEBUG
-    printk(KERN_ERR "Sent Mason %s packet\n", mason_type_str(skb));
-#endif
+    mason_logd( "sent %s packet", mason_type_str(skb));
     dev_queue_xmit(skb);
     rc = 0;
   }
@@ -953,13 +921,13 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, un
 
   tbl = rnd->tbl;  
   if (tbl->ids[sender_id]) {
-    printk(KERN_ERR "Trying to add Mason protocol identity which already exists\n");
+    mason_loge("attempt to add identity that already exists.  Ignoring");
     return -EINVAL;
   }
 
   id = kmalloc(sizeof(struct masonid), GFP_ATOMIC);
   if (!id) {
-    printk(KERN_ERR "Failed to allocate memeory for Mason protocol: masonid in id_table\n");
+    mason_loge("failed to allocate memory for 'struct masonid'");
     return -ENOMEM;
   }
   tbl->ids[sender_id] = id;
@@ -975,16 +943,10 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, un
   /* If this is our identity, record the number assigned by the initiator */
   if (0 == memcmp(rnd->pub_key, id->pub_key, RSA_LEN)) {
     rnd->my_id = sender_id;
-#ifdef MASON_DEBUG
-    printk(KERN_DEBUG "My ID assigned by initiator is %u\n", sender_id);
-#endif
+    mason_logd("initiator assigned id:%u", sender_id);
   }  
-
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Added Mason Identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...\n", 
-	 rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
-#endif  
-
+  mason_logd("added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
+	     rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
   return 0;
 }
 
@@ -1007,10 +969,8 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   obs->rssi = rssi;
   obs->next = prev_obs;
   msnid->head = obs;
-
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Recorded new MEAS packet. sender_id:%u pkt_id:%u rssi:%d\n", id, pkt_id, rssi);
-#endif
+  
+  mason_logd("recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
 }
 
 /* **************************************************************
@@ -1033,19 +993,17 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
   skb_pull(skb, sizeof(struct masonhdr));
   hdr = mason_hdr(skb);
   if (MASON_VERSION != hdr->version) {
-    printk(KERN_ERR "Dropping packet with invalid Mason version number: %i != %i\n", MASON_VERSION, hdr->version);
+    mason_loge("dropping packet with invalid version. got:%u expected:%u", hdr->version, MASON_VERSION);
     goto free_skb;
   }
 
   /* Verify the round number */
   if (cur_fsm->rnd && (cur_fsm->rnd->rnd_id != 0) && (cur_fsm->rnd->rnd_id != ntohl(hdr->rnd_id)) ) {
-    printk(KERN_INFO "Dropping packet with differing round id: %u != %u\n", cur_fsm->rnd->rnd_id, ntohl(hdr->rnd_id));
+    mason_logi("dropping packet with non-matching round id: got:%u expected:%u", ntohl(hdr->rnd_id), cur_fsm->rnd->rnd_id);
     goto free_skb;
   }
-
-#ifdef MASON_DEBUG
-  printk(KERN_DEBUG "Received Mason %s packet\n", mason_type_str(skb));
-#endif
+  
+  mason_logd("received %s packet", mason_type_str(skb));
   input = kmalloc(sizeof(*input), GFP_ATOMIC);
   if (!input)
     goto free_skb;
@@ -1072,7 +1030,7 @@ static int __init mason_init(void)
 {
   struct fsm_input *input;
   
-  printk(KERN_INFO "Loading Mason Protocol Module\n");
+  mason_logi("Loading Mason Protocol module");
   mason_dev = dev_get_by_name(&init_net, DEV_NAME); /* TODO: Find the
 						       device by
 						       feature, rather
@@ -1084,14 +1042,14 @@ static int __init mason_init(void)
 						       device addition
 						       and removal. */
   if (!mason_dev) {
-    printk(KERN_ERR "Failed to find net_device for Mason protocol\n");
+    mason_loge("Failed to find default net_device");
     return -EINVAL;
   }
 
   
   cur_fsm = new_fsm();
   if (!cur_fsm) {
-    printk(KERN_ERR "Failed to allocate memory for struct fsm\n");
+    mason_loge("Failed to allocate memory for 'struct fsm'");
     dev_put(mason_dev);
     return -ENOMEM;
   }
@@ -1113,7 +1071,7 @@ static int __init mason_init(void)
 
 static void __exit mason_exit(void)
 {
-  printk(KERN_INFO "Unloading Mason Protocol Module\n");
+  mason_logi("Unloading Mason Protocol module");
   if (mason_dev)
     dev_put(mason_dev);
   if (cur_fsm) {

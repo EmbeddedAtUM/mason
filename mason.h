@@ -137,6 +137,25 @@ static inline void del_fsm_timer(struct fsm_timer *timer)
 }
 
 /* **************************************************************
+ * Debug methods
+ * ************************************************************** */
+#define MASON_KLOG "mason: "
+#define MASON_KLOG_TERM "\n"
+
+#ifdef MASON_DEBUG
+#define mason_logd(str, ...) \
+  printk(KERN_DEBUG MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
+#else
+#define mason_logd(str, ...)
+#endif
+
+#define mason_logi(str, ...) \
+  printk(KERN_INFO MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
+
+#define mason_loge(str, ...) \
+  printk(KERN_ERR MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
+
+/* **************************************************************
  * Round data
  * ************************************************************** */
 /* Forward declaration */
