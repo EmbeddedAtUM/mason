@@ -718,7 +718,7 @@ extern struct masontail *mason_tail(const struct sk_buff *skb)
 /*
  * Create a Mason packet, with room past the header for 'len' bytes of data
  */
-static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len) {
+static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short type, int len) {
   struct sk_buff *skb;
   struct masonhdr *hdr;
   struct net_device *dev;
@@ -744,6 +744,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len) {
   skb_put(skb, sizeof(*hdr));
   hdr = mason_hdr(skb);
   hdr->version = MASON_VERSION;
+  hdr->type = type;
   hdr->sig = 0;
   hdr->rnd_id = htonl(rnd->rnd_id);
   hdr->sender_id = htons(rnd->my_id);
@@ -755,16 +756,11 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len) {
 static struct sk_buff *create_mason_par(struct rnd_info *rnd)
 {
   struct sk_buff *skb;
-  struct masonhdr *hdr;
   struct par_masonpkt *typehdr;
 
-  skb = create_mason_packet(rnd, sizeof(struct par_masonpkt));
+  skb = create_mason_packet(rnd, MASON_PAR, sizeof(struct par_masonpkt));
   if (!skb)
     goto out;
-
-  /* Set the type in the header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_PAR;
 
   /* Set the type-specific data */
   skb_put(skb, sizeof(struct par_masonpkt));
@@ -785,16 +781,11 @@ static struct sk_buff *create_mason_par(struct rnd_info *rnd)
 static struct sk_buff *create_mason_init(struct rnd_info *rnd) 
 {
   struct sk_buff *skb;
-  struct masonhdr *hdr;
   struct init_masonpkt *typehdr;
 
-  skb = create_mason_packet(rnd, sizeof(*typehdr));
+  skb = create_mason_packet(rnd, MASON_INIT, sizeof(*typehdr));
   if (!skb)
     goto out;
-
-  /* Set the type in the header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_INIT;
 
   /* Set the type-specific data */
   typehdr = (struct init_masonpkt *)mason_typehdr(skb);
@@ -831,7 +822,6 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id)
 {  
   struct sk_buff *skb;
-  struct masonhdr *hdr;
   struct parlist_masonpkt *typehdr;
   unsigned int num_ids, i;
   __u8 *data;
@@ -845,13 +835,9 @@ static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *
 		(rnd->dev->mtu - sizeof(struct masonhdr) - sizeof(struct parlist_masonpkt)) / RSA_LEN);
 
   /* Build the packet */
-  skb = create_mason_packet(rnd, sizeof(struct parlist_masonpkt) + num_ids * RSA_LEN);
+  skb = create_mason_packet(rnd, MASON_PARLIST, sizeof(struct parlist_masonpkt) + num_ids * RSA_LEN);
   if (!skb)
     goto out;
-
-  /* Set the type in the header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_PARLIST;
 
   /* Set the type-specific data */
   typehdr = (struct parlist_masonpkt *)mason_typehdr(skb);
@@ -884,16 +870,11 @@ static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id)
 {
   struct sk_buff *skb;
-  struct masonhdr *hdr;
   struct txreq_masonpkt *typehdr;
 
-  skb = create_mason_packet(rnd, sizeof(struct txreq_masonpkt));
+  skb = create_mason_packet(rnd, MASON_TXREQ, sizeof(struct txreq_masonpkt));
   if (!skb)
     goto out;
-
-  /* Set the type in the  header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_TXREQ;
 
   /* Set the type header */
   typehdr = (struct txreq_masonpkt *)mason_typehdr(skb);
@@ -914,15 +895,10 @@ static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id)
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd)
 {
   struct sk_buff *skb;
-  struct masonhdr *hdr;
 
-  skb = create_mason_packet(rnd, 0);
+  skb = create_mason_packet(rnd, MASON_MEAS, 0);
   if(!skb)
     goto out;
-
-  /* Set the type in the header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_MEAS;
 
   /* Set the LL header */
   if (0 > dev_hard_header(skb, skb->dev, ntohs(skb->protocol), skb->dev->broadcast, NULL, skb->len)) {
@@ -938,15 +914,10 @@ static struct sk_buff *create_mason_meas(struct rnd_info *rnd)
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd)
 {
   struct sk_buff *skb;
-  struct masonhdr *hdr;
 
-  skb = create_mason_packet(rnd, 0);
+  skb = create_mason_packet(rnd, MASON_ABORT, 0);
   if (!skb)
     goto out;
-  
-  /* Set the type in the header */
-  hdr = mason_hdr(skb);
-  hdr->type = MASON_ABORT;
 
   /* Set the LL header */
   if (0 > dev_hard_header(skb, skb->dev, ntohs(skb->protocol), skb->dev->broadcast, NULL, skb->len)) {

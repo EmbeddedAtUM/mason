@@ -185,26 +185,26 @@ struct rnd_info {
 static struct rnd_info *new_rnd_info(void);
 static void free_rnd_info(struct rnd_info *ptr);
 static struct rnd_info *reset_rnd_info(struct rnd_info *ptr); 
-
 static void free_id_table(struct id_table *ptr);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
-
 static void free_identity(struct masonid *ptr);
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, unsigned char* hwaddr);
-
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
 
 /* **************************************************************
  *              Mason Packet utility functions
  * ************************************************************** */
-static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len);
+static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short type, int len);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id);
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
+
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
+
+
 static __u16 select_next_txreq_id(struct rnd_info *rnd);
 
 #endif /* _MASON_H */
