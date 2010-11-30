@@ -39,28 +39,22 @@ static struct fsm *cur_fsm;
 static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  struct masonhdr *hdr;
-  struct init_masonpkt *typehdr;
   unsigned char *hwaddr = NULL;
 
-  hdr = mason_hdr(skb);
-  switch (hdr->type) {
+  switch (mason_type(skb)) {
   case MASON_INIT:
     if (!pskb_may_pull(skb, sizeof(struct init_masonpkt))) {
       ret = fsm_idle;
       goto out;
     }
-    
-    /* Save info from packet */
-    hdr = mason_hdr(skb);
-    typehdr = (struct init_masonpkt *) mason_typehdr(skb);
-    
+
+    /* Save info from packet */    
     dev_hold(skb->dev);
     rnd->dev = skb->dev;
-    rnd->rnd_id = ntohl(hdr->rnd_id);
+    rnd->rnd_id = mason_round_id(skb);
     hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
     if (!hwaddr || !dev_parse_header(skb, hwaddr) 
-	|| (0 > add_identity(rnd, ntohs(hdr->sender_id), typehdr->pub_key, hwaddr)))
+	|| (0 > add_identity(rnd, mason_sender_id(skb), mason_init_pubkey(skb), hwaddr)))
       goto err;
     mason_logd("initiator hwaddr:%x:%x:%x:%x:%x:%x",
 	       hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
@@ -88,31 +82,29 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
 
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  struct masonhdr *hdr;
-  struct parlist_masonpkt *typehdr;
   unsigned int i, count, start_id;
   __u8 *data;
 
-  hdr = mason_hdr(skb);
   if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt))) {
     mason_loge("PARLIST packet is too short");
     return;
   }
-  typehdr = (struct parlist_masonpkt*) mason_typehdr(skb);  
-  skb_pull(skb, sizeof(struct parlist_masonpkt));
   
   /* Verify the values in the parlist header are reasonable */
-  count = ntohs(typehdr->count);
-  start_id = ntohs(typehdr->start_id);
+  count = mason_parlist_count(skb);
+  start_id = mason_parlist_id(skb);
 
-  if (!pskb_may_pull(skb, count * RSA_LEN)) {
-    mason_logd("PARLIST packet claims more data than available");
+  if (!pskb_may_pull(skb, count * RSA_LEN + sizeof(struct parlist_masonpkt))) {
+    mason_logi("PARLIST packet claims more data than available");
     return;
   }
-  if (start_id > MAX_PARTICIPANTS)
+  if (start_id + count - 1 > MAX_PARTICIPANTS) {
+    mason_logi("PARLIST packet claims invalid ids");
     return;
+  }
   
-  data = (__u8 *)(typehdr+1);
+  /* Add the participants to the identity table */
+  data = mason_data(skb);
   for(i = start_id; i < count + start_id; ++i) {
     add_identity(rnd, i, data, NULL);
     data += RSA_LEN;
@@ -129,11 +121,8 @@ static __u16 select_next_txreq_id(struct rnd_info *rnd) {
 
 static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
   enum fsm_state ret;
-  struct masonhdr *hdr;
-  struct txreq_masonpkt *typehdr;
 
-  hdr = mason_hdr(skb);
-  switch (hdr->type) {
+  switch (mason_type(skb)) {
   case MASON_PARLIST:
     del_fsm_timer(&rnd->timer);
     import_mason_parlist(rnd, skb);
@@ -142,9 +131,8 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
     goto out;
   case MASON_TXREQ:
     del_fsm_timer(&rnd->timer);
-    typehdr = (struct txreq_masonpkt *)mason_typehdr(skb);
     if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
-	&& ntohs(typehdr->id) == rnd->my_id )
+	&& mason_txreq_id(skb) == rnd->my_id )
       bcast_mason_packet(create_mason_meas(rnd)); 
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_txreq;
@@ -155,7 +143,7 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
     ret = fsm_c_parlist;
     goto out;
   }
-
+  
  abort:
   mason_logd("aborting");
   reset_rnd_info(rnd);
@@ -169,23 +157,19 @@ static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff 
 static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  struct masonhdr *hdr;
-  struct txreq_masonpkt *typehdr;
   
-  hdr = mason_hdr(skb);
-  switch(hdr->type) {
+  switch(mason_type(skb)) {
   case MASON_TXREQ:
     del_fsm_timer(&rnd->timer);
-    typehdr = (struct txreq_masonpkt *)mason_typehdr(skb);
     if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
-	&& ntohs(typehdr->id) == rnd->my_id)
+	&& mason_txreq_id(skb) == rnd->my_id)
       bcast_mason_packet(create_mason_meas(rnd)); 
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_txreq;
     goto out;
   case MASON_MEAS:
     del_fsm_timer(&rnd->timer);
-    record_new_obs(rnd->tbl, ntohs(hdr->sender_id), ntohs(hdr->pkt_uid), hdr->rssi);
+    record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_txreq;
     goto out;
@@ -213,20 +197,16 @@ static enum fsm_state fsm_c_rsstreq_packet(struct rnd_info *rnd, struct sk_buff 
 
 static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  struct masonhdr *hdr;
-  struct par_masonpkt *typehdr;
   unsigned char *hwaddr = NULL;
 
-  hdr = mason_hdr(skb);
-  switch (hdr->type) {
+  switch (mason_type(skb)) {
   case MASON_PAR:
-    if (!pskb_may_pull(skb, sizeof(*typehdr))) 
+    if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
       goto out;
-    typehdr = mason_typehdr(skb);
     if (rnd->tbl->max_id < MAX_PARTICIPANTS) {
       hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
       if (!hwaddr || !dev_parse_header(skb, hwaddr) 
-	  || (0 > add_identity(rnd, ++rnd->tbl->max_id, typehdr->pub_key, hwaddr)))
+	  || (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb), hwaddr)))
 	goto abort;
       goto out;
     } else {
@@ -254,18 +234,15 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
 static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  struct masonhdr *hdr;
 
-  hdr = mason_hdr(skb);
-  switch(hdr->type) {
+  switch(mason_type(skb)) {
   case MASON_MEAS :
-    hdr = mason_hdr(skb);
-    if (ntohs(hdr->sender_id) != rnd->txreq_id) {
+    if (mason_sender_id(skb) != rnd->txreq_id) {
       ret = fsm_s_meas;
       goto out;
     } 
     del_fsm_timer(&rnd->timer);
-    record_new_obs(rnd->tbl, ntohs(hdr->sender_id), ntohs(hdr->pkt_uid), hdr->rssi);
+    record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
     
     if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
       if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd))))
@@ -585,36 +562,52 @@ static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd)
  *            Mason packet utility functions
  * ************************************************************** */
 /*
+ * Returns a pointer to the start of any variable length data.  This
+ * is just past the end of the typehdr.
+ */
+extern void *mason_data(const struct sk_buff *skb)
+{
+  switch (mason_type(skb)) {
+  case MASON_INIT:    return ((void *)mason_typehdr(skb)) + sizeof(struct init_masonpkt);
+  case MASON_PAR:     return ((void *)mason_typehdr(skb)) + sizeof(struct par_masonpkt);
+  case MASON_PARLIST: return ((void *)mason_typehdr(skb)) + sizeof(struct parlist_masonpkt);
+  case MASON_TXREQ:   return ((void *)mason_typehdr(skb)) + sizeof(struct txreq_masonpkt);
+  case MASON_MEAS:    return ((void *)mason_typehdr(skb)) + sizeof(struct meas_masonpkt);
+  case MASON_RSSTREQ: return ((void *)mason_typehdr(skb)) + sizeof(struct rsstreq_masonpkt);
+  case MASON_RSST:    return ((void *)mason_typehdr(skb)) + sizeof(struct rsst_masonpkt);
+  case MASON_ABORT:   return ((void *)mason_typehdr(skb)) + sizeof(struct abort_masonpkt);
+  default:
+    mason_loge("invalid packet type received");
+    return NULL;
+  }
+}
+
+/*
  * Returns a pointer to the tail structure (aka signature) if the
  * packet header indicates that one is included. Otherwise, returns
  * NULL.
+ *
+ * TODO: Add checks to ensure that the sk_buff actually contains
+ * enough data for the return pointer to be valid
  */
 extern struct masontail *mason_tail(const struct sk_buff *skb)
 {
-  struct masonhdr *hdr = mason_hdr(skb);
-  void *typehdr = mason_typehdr(skb);
-  if (!hdr->sig) {
+  if (!mason_is_signed(skb)) {
     return NULL;
   } else {
-    switch (hdr->type) {
-    case MASON_INIT:
-      return typehdr + sizeof(struct init_masonpkt);
-    case MASON_PAR:
-      return typehdr + sizeof(struct par_masonpkt);
+    switch (mason_type(skb)) {
     case MASON_PARLIST:
-      return typehdr + sizeof(struct parlist_masonpkt) + 
-	((struct parlist_masonpkt *)typehdr)->count * RSA_LEN;
-    case MASON_TXREQ:
-      return typehdr + sizeof(struct txreq_masonpkt);
-    case MASON_MEAS:
-      return typehdr + sizeof(struct meas_masonpkt);
-    case MASON_RSSTREQ:
-      return typehdr + sizeof(struct rsstreq_masonpkt);
+      return mason_data(skb) + 	mason_parlist_count(skb) * RSA_LEN;
     case MASON_RSST:
-      return typehdr + sizeof(struct rsst_masonpkt) +
-	((struct rsst_masonpkt *)typehdr)->len;
+      return mason_typehdr(skb) + sizeof(struct rsst_masonpkt) +
+	((struct rsst_masonpkt *)mason_typehdr(skb))->len;
+    case MASON_INIT:
+    case MASON_PAR:
+    case MASON_TXREQ:
+    case MASON_MEAS:
+    case MASON_RSSTREQ:
     case MASON_ABORT:
-      return typehdr + sizeof(struct abort_masonpkt);
+      return mason_data(skb);
     default:
       mason_loge("invalid packet type received");
       return NULL;
@@ -656,6 +649,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short 
   hdr->rnd_id = htonl(rnd->rnd_id);
   hdr->sender_id = htons(rnd->my_id);
   hdr->pkt_uid = htons(rnd->pkt_id++);
+  hdr->rssi = 0;
 
   return skb;
 }
