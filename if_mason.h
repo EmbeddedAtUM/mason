@@ -82,7 +82,6 @@ struct txreq_masonpkt {
 
 /* rssi measurement packet */
 struct meas_masonpkt {
-  __be16 id;
 } __attribute__((__packed__));
 
 /* RSST request packet */

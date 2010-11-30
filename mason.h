@@ -15,13 +15,15 @@
 
 #define DEV_NAME "tiwlan0"
 
+#define MIN_PARTICIPANTS 1
+#define MAX_PARTICIPANTS 400
+
 #define CLIENT_TIMEOUT 500
 #define PAR_TIMEOUT 100
 #define MEAS_TIMEOUT 30
 #define RSST_TIMEOUT 100
 
-#define MIN_PARTICIPANTS 1
-#define MAX_PARTICIPANTS 400
+#define TXREQ_PER_ID_AVG 4
 
 /* **************************************************************
  *    State Machine Declarations
@@ -168,7 +170,9 @@ struct rnd_info {
   __u32 rnd_id;
   __u16 my_id;
   __u16 pkt_id;
-  __u8 pub_key[RSA_LEN];
+  __u8  pub_key[RSA_LEN];
+  __u16 txreq_id;
+  __u16 txreq_cnt; 
   struct net_device *dev;
   struct id_table *tbl;
   struct fsm_timer timer;
@@ -186,7 +190,9 @@ static void free_id_table(struct id_table *ptr);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
 
 static void free_identity(struct masonid *ptr);
-static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
+static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, unsigned char* hwaddr);
+
+static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
 
 /* **************************************************************
  *              Mason Packet utility functions
@@ -195,9 +201,11 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, int len);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id);
-static struct sk_buff *create_mason_next_txreq(struct rnd_info *rnd);
+static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
+static struct sk_buff *create_mason_meas(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
+static __u16 select_next_txreq_id(struct rnd_info *rnd);
 
 #endif /* _MASON_H */
 
