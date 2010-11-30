@@ -201,6 +201,14 @@ struct rnd_info {
 		      maintained. */
 };
 
+static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev)
+{
+  if (rnd->dev)
+    dev_put(rnd->dev);
+  dev_hold(dev);
+  rnd->dev = dev;
+}
+
 static struct rnd_info *new_rnd_info(void);
 static void free_rnd_info(struct rnd_info *ptr);
 static struct rnd_info *reset_rnd_info(struct rnd_info *ptr); 
@@ -209,6 +217,8 @@ static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_identity(struct masonid *ptr);
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, unsigned char* hwaddr);
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
+static unsigned char *copy_hwaddr(struct sk_buff *skb);
+
 
 /* **************************************************************
  *              Mason Packet utility functions

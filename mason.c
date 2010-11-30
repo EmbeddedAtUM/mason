@@ -48,18 +48,24 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
       goto out;
     }
 
-    /* Save info from packet */    
-    dev_hold(skb->dev);
-    rnd->dev = skb->dev;
+    /* Save info from packet */
+    rnd_info_set_dev(rnd, skb->dev);
     rnd->rnd_id = mason_round_id(skb);
-    hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
-    if (!hwaddr || !dev_parse_header(skb, hwaddr) 
-	|| (0 > add_identity(rnd, mason_sender_id(skb), mason_init_pubkey(skb), hwaddr)))
+    hwaddr = copy_hwaddr(skb);
+    if (!hwaddr || (0 > add_identity(rnd, mason_sender_id(skb), mason_init_pubkey(skb), hwaddr))) {
+      mason_logd("failed to add identity of initiator");
+      if (hwaddr)
+	kfree(hwaddr);
       goto err;
+    }
     mason_logd("initiator hwaddr:%x:%x:%x:%x:%x:%x",
 	       hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
-    get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));       /* Set the public key */
-    if (0 != send_mason_packet(create_mason_par(rnd), hwaddr))  /* Send PAR message */
+
+    /* Set the public key */
+    get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));      
+
+    /* Send PAR message */
+    if (0 != send_mason_packet(create_mason_par(rnd), hwaddr))  
       goto err;
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_parlist;
@@ -70,8 +76,6 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
   }
   
  err:
-  if (hwaddr)
-    kfree(hwaddr);
   reset_rnd_info(rnd);
   ret = fsm_idle;  
   
@@ -204,10 +208,13 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
     if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
       goto out;
     if (rnd->tbl->max_id < MAX_PARTICIPANTS) {
-      hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
-      if (!hwaddr || !dev_parse_header(skb, hwaddr) 
-	  || (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb), hwaddr)))
+      hwaddr = copy_hwaddr(skb);
+      if (!hwaddr  || (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb), hwaddr))) {
+	mason_logd("failed to add identity from PAR packet");
+	if (hwaddr)
+	  kfree(hwaddr);
 	goto abort;
+      }
       goto out;
     } else {
       mason_logd("participant limit exceeded.  aborting");
@@ -225,8 +232,6 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
   mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   reset_rnd_info(rnd);
-  if (hwaddr)
-    kfree(hwaddr);
   kfree_skb(skb);
   return fsm_idle;
 }
@@ -965,6 +970,17 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   msnid->head = obs;
   
   mason_logd("recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
+}
+
+static unsigned char *copy_hwaddr(struct sk_buff *skb) 
+{
+  unsigned char *copy;
+  copy = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
+  if (copy 
+      && dev_parse_header(skb, copy)) 
+    return copy;
+  else
+    return NULL;
 }
 
 /* **************************************************************
