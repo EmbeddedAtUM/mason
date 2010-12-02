@@ -303,7 +303,7 @@ static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 {
   enum fsm_state ret;
-  unsigned int cur_id = 1;
+  __u16 cur_id = 1;
 
   mason_logd("initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
@@ -711,11 +711,11 @@ static struct sk_buff *create_mason_init(struct rnd_info *rnd)
  * @return the sk_buff containing the packet. NULL if no participants
  * remain or an allocation error occurred.
  */
-static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id)
+static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, __u16 *start_id)
 {  
   struct sk_buff *skb;
   struct parlist_masonpkt *typehdr;
-  unsigned int num_ids, i;
+  __u16 num_ids, i;
   __u8 *data;
 
   /* Exit if no more ids to send */
@@ -723,8 +723,7 @@ static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *
     return NULL;
   
   /* Determine number of ids to include in packet */
-  num_ids = min(rnd->tbl->max_id - *start_id + 1, 
-		(rnd->dev->mtu - sizeof(struct masonhdr) - sizeof(struct parlist_masonpkt)) / RSA_LEN);
+  num_ids =  min( rnd->tbl->max_id - *start_id + 1,  (__u16) (rnd->dev->mtu - sizeof(struct masonhdr) - sizeof(struct parlist_masonpkt)) / RSA_LEN );
 
   /* Build the packet */
   skb = create_mason_packet(rnd, MASON_PARLIST, sizeof(struct parlist_masonpkt) + num_ids * RSA_LEN);

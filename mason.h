@@ -179,7 +179,7 @@ struct masonid {
 
 struct id_table {
   struct masonid *ids[MAX_PARTICIPANTS];
-  short max_id;
+  __u16 max_id;
 };
 
 /* Information associated with a round */
@@ -226,7 +226,7 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr);
 static int bcast_mason_packet(struct sk_buff *skb);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
-static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, unsigned int *start_id);
+static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, __u16 *start_id);
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
