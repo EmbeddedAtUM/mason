@@ -13,8 +13,6 @@
 #include <linux/netdevice.h>
 #include <linux/spinlock.h>
 
-#define DEV_NAME "tiwlan0"
-
 #define MIN_PARTICIPANTS 1
 #define MAX_PARTICIPANTS 400
 

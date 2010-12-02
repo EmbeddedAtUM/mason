@@ -27,8 +27,12 @@ MODULE_AUTHOR("David R. Bild <drbild@umich.edu>");
 
 
 static short int init = 0;
-module_param(init, short, 0);
+module_param(init, short, S_IRUGO);
 MODULE_PARM_DESC(init, "1 if the module should initiate a round of mason test\n");
+
+static char *iface = "tiwlan0";
+module_param(iface, charp, S_IRUGO);
+MODULE_PARM_DESC(iface, "interface on which to initiate Mason tests\n");
 
 static struct net_device *mason_dev;
 static struct fsm *cur_fsm;
@@ -1041,16 +1045,16 @@ static int __init mason_init(void)
   struct fsm_input *input;
   
   mason_logi("Loading Mason Protocol module");
-  mason_dev = dev_get_by_name(&init_net, DEV_NAME); /* TODO: Find the
-						       device by
-						       feature, rather
-						       than by name.
-						       Register for
-						       net_device
-						       notification
-						       chain to handle
-						       device addition
-						       and removal. */
+  mason_dev = dev_get_by_name(&init_net, iface); /* TODO: Find the
+						    device by
+						    feature, rather
+						    than by name.
+						    Register for
+						    net_device
+						    notification
+						    chain to handle
+						    device addition
+						    and removal. */
   if (!mason_dev) {
     mason_loge("Failed to find default net_device");
     return -EINVAL;

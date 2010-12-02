@@ -17,8 +17,10 @@ all:
 clean:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) clean
 
-ins: mason.o
-	sudo /sbin/insmod mason.ko
+ins:
+	sudo /sbin/insmod mason.ko iface=eth0
+insinit:
+	sudo /sbin/insmod mason.ko init=1 iface=eth0
 rm:
 	sudo /sbin/rmmod mason
 push:
