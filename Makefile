@@ -19,6 +19,8 @@ clean:
 
 ins:
 	sudo /sbin/insmod mason.ko iface=eth0
+ins100:
+	sudo /sbin/insmod mason.ko iface=eth0 numids=100
 insinit:
 	sudo /sbin/insmod mason.ko init=1 iface=eth0
 rm:
@@ -28,6 +30,8 @@ push:
 	adb push mason.ko system/lib/modules
 adbins:
 	adb shell 'insmod system/lib/modules/mason.ko'
+adbins100:
+	adb shell 'insmod system/lib/modules/mason.ko numids=100'
 adbinsinit:
 	adb shell 'insmod system/lib/modules/mason.ko init=1'
 adbrm:

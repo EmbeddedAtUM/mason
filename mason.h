@@ -12,6 +12,7 @@
 
 #include <linux/netdevice.h>
 #include <linux/spinlock.h>
+#include <linux/list.h>
 
 #define MIN_PARTICIPANTS 1
 #define MAX_PARTICIPANTS 400
@@ -46,6 +47,7 @@ enum fsm_input_type {
 
 struct rnd_info;
 struct fsm {
+  struct list_head fsm_list;
   struct semaphore sem;
   enum fsm_state cur_state;
   struct rnd_info *rnd;
@@ -65,12 +67,9 @@ struct fsm_dispatch {
 };
 
 static struct fsm *new_fsm(void);
+static void fsm_init(struct fsm *fsm);
 static void free_fsm(struct fsm *ptr);
-
-static inline void fsm_init(struct fsm *fsm) {
-  sema_init(&fsm->sem, 1);
-  fsm->cur_state = fsm_idle;
-};
+#define FIRST_FSM list_first_entry(&fsm_list, struct fsm, fsm_list)
 
 static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
 static void fsm_dispatch_process(struct work_struct *work);

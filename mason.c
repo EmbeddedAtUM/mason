@@ -32,10 +32,14 @@ MODULE_PARM_DESC(init, "1 if the module should initiate a round of mason test\n"
 
 static char *iface = "tiwlan0";
 module_param(iface, charp, S_IRUGO);
-MODULE_PARM_DESC(iface, "interface on which to initiate Mason tests\n");
+MODULE_PARM_DESC(iface, "Interface on which to initiate Mason tests. Default is 'tiwlan0'.\n");
+
+static short int numids = 1;
+module_param(numids, short, S_IRUGO);
+MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 
 static struct net_device *mason_dev;
-static struct fsm *cur_fsm;
+static LIST_HEAD(fsm_list);
 
 /* **************************************************************
  * State Machine transition functions
@@ -211,7 +215,7 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
   case MASON_PAR:
     if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
       goto out;
-    if (rnd->tbl->max_id < MAX_PARTICIPANTS) {
+    if (rnd->tbl->max_id < MAX_PARTICIPANTS - 1) {
       hwaddr = copy_hwaddr(skb);
       if (!hwaddr  || (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb), hwaddr))) {
 	mason_logd("failed to add identity from PAR packet");
@@ -886,8 +890,16 @@ static struct fsm *new_fsm(void)
   return ret;
 }
 
+static void fsm_init(struct fsm *fsm) {
+  list_add(&fsm->fsm_list, &fsm_list);
+  sema_init(&fsm->sem, 1);
+  fsm->cur_state = fsm_idle;
+};
+
+
 static void free_fsm(struct fsm *ptr)
 {
+  list_del(&ptr->fsm_list);
   kfree(ptr);
 }
    
@@ -991,7 +1003,7 @@ static unsigned char *copy_hwaddr(struct sk_buff *skb)
  * ************************************************************** */
 static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev) {
   struct fsm_input *input;
-  struct masonhdr *hdr;
+  struct fsm *fsm;
   int rc = 0;
   
   /* Drop packet if not addressed to us */
@@ -1004,26 +1016,43 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
 
   skb_reset_network_header(skb);  
   skb_pull(skb, sizeof(struct masonhdr));
-  hdr = mason_hdr(skb);
-  if (MASON_VERSION != hdr->version) {
-    mason_loge("dropping packet with invalid version. got:%u expected:%u", hdr->version, MASON_VERSION);
+  if (MASON_VERSION != mason_version(skb)) {
+    mason_loge("dropping packet with invalid version. got:%u expected:%u", mason_version(skb), MASON_VERSION);
     goto free_skb;
   }
 
-  /* Verify the round number */
-  if (cur_fsm->rnd && (cur_fsm->rnd->rnd_id != 0) && (cur_fsm->rnd->rnd_id != ntohl(hdr->rnd_id)) ) {
-    mason_logi("dropping packet with non-matching round id: got:%u expected:%u", ntohl(hdr->rnd_id), cur_fsm->rnd->rnd_id);
-    goto free_skb;
+  mason_logd("received %s packet for round:%u", mason_type_str(skb), mason_round_id(skb));
+
+  /* Deliver the packet to each fsm */
+  list_for_each_entry( fsm, &fsm_list, fsm_list) {
+    /* Optimization for TXREQ packets.
+     * Only pass the packet to the FSM if the request ID matches that of this FSM
+     */
+    if (mason_type(skb) == MASON_TXREQ && fsm->rnd && mason_txreq_id(skb) != fsm->rnd->my_id)
+      continue;
+    
+    /* Verify the round number */
+    if (fsm->rnd && (fsm->rnd->rnd_id != 0) && (fsm->rnd->rnd_id != mason_round_id(skb))) {
+      mason_logi("dropping packet with non-matching round id: got:%u expected:%u", mason_round_id(skb), fsm->rnd->rnd_id);
+      continue;
+    }
+
+    /* Pass the packet to the FSM */
+    input = kmalloc(sizeof(*input), GFP_ATOMIC);
+    if (!input)
+      continue;
+
+    input->type = fsm_packet;
+    if (list_is_singular(&fsm_list)) /* Don't clone if there's only one consumer */
+      input->data.skb = skb_get(skb);
+    else 
+      input->data.skb = skb_clone(skb, GFP_ATOMIC);
+    
+    if (input->data.skb)
+      fsm_dispatch_interrupt(fsm, input);    
+    else
+      kfree(input);
   }
-  
-  mason_logd("received %s packet", mason_type_str(skb));
-  input = kmalloc(sizeof(*input), GFP_ATOMIC);
-  if (!input)
-    goto free_skb;
-  input->type = fsm_packet;
-  input->data.skb = skb;
-  fsm_dispatch_interrupt(cur_fsm, input);
-  return rc;
   
  free_skb:
   kfree_skb(skb);
@@ -1042,7 +1071,8 @@ static struct packet_type mason_packet_type = {
 static int __init mason_init(void)
 {
   struct fsm_input *input;
-  
+  unsigned short int i;
+
   mason_logi("Loading Mason Protocol module");
   mason_dev = dev_get_by_name(&init_net, iface); /* TODO: Find the
 						    device by
@@ -1059,14 +1089,17 @@ static int __init mason_init(void)
     return -EINVAL;
   }
 
-  
-  cur_fsm = new_fsm();
-  if (!cur_fsm) {
+  /* Create the default fsm */
+  if (!new_fsm()) {
     mason_loge("Failed to allocate memory for 'struct fsm'");
     dev_put(mason_dev);
     return -ENOMEM;
   }
   
+  for (i = 1; i < numids; ++i) {
+    new_fsm();
+  }
+
   dev_add_pack(&mason_packet_type);
 
   if (1 == init) {
@@ -1075,7 +1108,7 @@ static int __init mason_init(void)
     if (!input)
       goto out;
     input->type = fsm_initiate;
-    fsm_dispatch_interrupt(cur_fsm, input);
+    fsm_dispatch_interrupt(FIRST_FSM, input);
   }
   
  out:
@@ -1084,14 +1117,18 @@ static int __init mason_init(void)
 
 static void __exit mason_exit(void)
 {
+  struct fsm *fsm, *tmp;
+
   mason_logi("Unloading Mason Protocol module");
   if (mason_dev)
     dev_put(mason_dev);
-  if (cur_fsm) {
-    if (cur_fsm->rnd)
-      free_rnd_info(cur_fsm->rnd);
-    free_fsm(cur_fsm);
+
+  list_for_each_entry_safe(fsm, tmp, &fsm_list, fsm_list) {
+    if (fsm->rnd)
+      free_rnd_info(fsm->rnd);
+    free_fsm(fsm);
   }
+
   dev_remove_pack(&mason_packet_type);
 }
 
