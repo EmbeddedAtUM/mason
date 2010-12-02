@@ -1,6 +1,6 @@
 #!/bin/bash
 
-export KERNEL_DIR=/usr/src/linux
+export KERNEL_DIR=/lib/modules/`uname -r`/build
 export ARCH=x86_64
 export CROSS_COMPILE=
 
