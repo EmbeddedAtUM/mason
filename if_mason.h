@@ -176,13 +176,23 @@ static inline __u16 mason_rsstreq_id(const struct sk_buff *skb)
 
 /* RSST packet */
 struct rsst_masonpkt {
-  __be16 len;
   __u8   frag; /*
 		* 0x0 if this is the final packet 
 		* 0x1 if additional packets are required to complete
 		*     transmission of the full RSST
 		*/
+  __be16 len;
 } __attribute__((__packed__));
+
+static inline __u16 mason_rsst_len(const struct sk_buff *skb)
+{
+  return ntohs(((struct rsst_masonpkt *)mason_typehdr(skb))->len);
+}
+
+static inline __u8 mason_rsst_is_frag(const struct sk_buff *skb)
+{
+  return ((struct rsst_masonpkt *)mason_typehdr(skb))->frag;
+}
 
 /* Abort packet */
 struct abort_masonpkt {

@@ -229,10 +229,15 @@ static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, __u16 *start_i
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);
 static struct sk_buff *create_mason_abort(struct rnd_info *rnd);
-
+static struct sk_buff *create_mason_rsstreq(struct rnd_info *rnd, __u16 id);
+struct create_rsst_state {
+  __u16 cur_id;
+  struct rssi_obs *cur_obs;
+};
+static struct sk_buff *create_mason_rsst(struct rnd_info *rnd, struct create_rsst_state *state);
 
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
-
+static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb);
 static __u16 select_next_txreq_id(struct rnd_info *rnd);
 
 #endif /* _MASON_H */
