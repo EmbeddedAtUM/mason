@@ -83,6 +83,19 @@ static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb
 static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *skb);
 
+static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_txreq(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state fsm_c_abort(struct rnd_info *rnd);
+
+static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_rsst(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_next_txreq(struct rnd_info *rnd);
+static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned char cont);
+static enum fsm_state fsm_s_abort(struct rnd_info *rnd);
+
 static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data);
@@ -212,10 +225,9 @@ static struct rnd_info *reset_rnd_info(struct rnd_info *ptr);
 static void free_id_table(struct id_table *ptr);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_identity(struct masonid *ptr);
-static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, unsigned char* hwaddr);
+static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
+static int set_identity_hwaddr(struct masonid *id, const struct sk_buff *skb);
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
-static unsigned char *copy_hwaddr(struct sk_buff *skb);
-
 
 /* **************************************************************
  *              Mason Packet utility functions

@@ -47,7 +47,6 @@ static LIST_HEAD(fsm_list);
 static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  unsigned char *hwaddr = NULL;
 
   switch (mason_type(skb)) {
   case MASON_INIT:
@@ -56,24 +55,25 @@ static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb)
       goto out;
     }
 
+    if (0 != mason_sender_id(skb)) {
+      ret = fsm_idle;
+      goto out;
+    }
+
     /* Save info from packet */
     rnd_info_set_dev(rnd, skb->dev);
     rnd->rnd_id = mason_round_id(skb);
-    hwaddr = copy_hwaddr(skb);
-    if (!hwaddr || (0 > add_identity(rnd, mason_sender_id(skb), mason_init_pubkey(skb), hwaddr))) {
+    if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
+	|| 0 > set_identity_hwaddr(rnd->tbl->ids[0], skb)) {
       mason_logd("failed to add identity of initiator");
-      if (hwaddr)
-	kfree(hwaddr);
       goto err;
     }
-    mason_logd("initiator hwaddr:%x:%x:%x:%x:%x:%x",
-	       hwaddr[0], hwaddr[1], hwaddr[2], hwaddr[3], hwaddr[4], hwaddr[5]);
-
+    
     /* Set the public key */
     get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));      
 
     /* Send PAR message */
-    if (0 != send_mason_packet(create_mason_par(rnd), hwaddr))  
+    if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
       goto err;
     mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
     ret = fsm_c_parlist;
@@ -118,12 +118,13 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   /* Add the participants to the identity table */
   data = mason_data(skb);
   for(i = start_id; i < count + start_id; ++i) {
-    add_identity(rnd, i, data, NULL);
+    add_identity(rnd, i, data);
     data += RSA_LEN;
   }
 }
 
-static __u16 select_next_txreq_id(struct rnd_info *rnd) {
+static __u16 select_next_txreq_id(struct rnd_info *rnd) 
+{
   __u16 rand_num;
   get_random_bytes(&rand_num, sizeof(rand_num));
   rnd->txreq_id = (rand_num % rnd->tbl->max_id) + 1;
@@ -131,95 +132,114 @@ static __u16 select_next_txreq_id(struct rnd_info *rnd) {
   return rnd->txreq_id;
 }
 
-static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb){
+static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  del_fsm_timer(&rnd->timer);
+  import_mason_parlist(rnd, skb);
+  mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+  return fsm_c_parlist;
+}
+
+static enum fsm_state handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
+{
+  if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))) {
+    del_fsm_timer(&rnd->timer);
+    if (mason_txreq_id(skb) == rnd->my_id)
+      bcast_mason_packet(create_mason_meas(rnd));
+    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+  }
+  return fsm_c_txreq;
+}
+
+static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  del_fsm_timer(&rnd->timer);
+  record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
+  mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+  return fsm_c_txreq;
+}
+
+static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  struct create_rsst_state state = {
+    .cur_id = 1,
+    .cur_obs = NULL,
+  };
+  
+  if (pskb_may_pull(skb, sizeof(struct rsstreq_masonpkt))) {
+    del_fsm_timer(&rnd->timer);
+    if (mason_rsstreq_id(skb) == rnd->my_id) {
+      while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
+      mason_logi("Finished round:%u", rnd->rnd_id);
+      reset_rnd_info(rnd); /* Finished */
+      return fsm_idle;
+    } else {
+      mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+      return fsm_c_rsstreq;
+    }
+  }
+  else {
+    return fsm_c_rsstreq;
+  }
+  
+}
+
+static enum fsm_state fsm_c_abort(struct rnd_info *rnd)
+{
+  mason_logd("aborting");
+  reset_rnd_info(rnd);
+  return fsm_idle;
+}
+
+static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb)
+{
   enum fsm_state ret;
 
   switch (mason_type(skb)) {
   case MASON_PARLIST:
-    del_fsm_timer(&rnd->timer);
-    import_mason_parlist(rnd, skb);
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-    ret = fsm_c_parlist;
-    goto out;
+    ret = handle_parlist(rnd, skb);
+    break;
   case MASON_TXREQ:
-    del_fsm_timer(&rnd->timer);
-    if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
-	&& mason_txreq_id(skb) == rnd->my_id )
-      bcast_mason_packet(create_mason_meas(rnd)); 
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-    ret = fsm_c_txreq;
-    goto out;
+    ret = handle_txreq(rnd, skb);
+    break;
   case MASON_MEAS:
-    del_fsm_timer(&rnd->timer);
-    record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-    ret = fsm_c_txreq;
-    goto out;
+    ret = handle_c_meas(rnd, skb);
+    break;
   case MASON_ABORT:
-    goto abort;
+    ret = fsm_c_abort(rnd);
+    break;
   default:
     ret = fsm_c_parlist;
-    goto out;
+    break;
   }
   
- abort:
-  mason_logd("aborting");
-  reset_rnd_info(rnd);
-  ret = fsm_idle;
-  
- out:
   kfree_skb(skb);
   return ret; 
 }
 
+
 static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  struct create_rsst_state state;
-  state.cur_id = 1;
-  state.cur_obs = NULL;
-
+  
   switch(mason_type(skb)) {
   case MASON_TXREQ:
-    del_fsm_timer(&rnd->timer);
-    if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))
-	&& mason_txreq_id(skb) == rnd->my_id)
-      bcast_mason_packet(create_mason_meas(rnd)); 
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-    ret = fsm_c_txreq;
-    goto out;
+    ret = handle_txreq(rnd, skb);
+    break;
   case MASON_MEAS:
-    del_fsm_timer(&rnd->timer);
-    record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-    ret = fsm_c_txreq;
-    goto out;
+    ret = handle_c_meas(rnd, skb);
+    break;
   case MASON_RSSTREQ:
-    del_fsm_timer(&rnd->timer);
-    if (pskb_may_pull(skb, sizeof(struct rsstreq_masonpkt))
-	&& mason_rsstreq_id(skb) == rnd->my_id) {
-      while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
-      reset_rnd_info(rnd);
-      ret = fsm_idle;
-      goto out;
-    } else {
-      mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-      ret = fsm_c_rsstreq;
-      goto out;
-    }
+    ret = handle_rsstreq(rnd, skb);
+    break;
   case MASON_ABORT:
-    goto abort;
+    ret = fsm_c_abort(rnd);
+    break;
   default:
     ret = fsm_c_txreq;
-    goto out;
+    break;
   }
   
- abort:
-  mason_logd("aborting");
-  reset_rnd_info(rnd);
-  ret = fsm_idle;
-  
- out:
   kfree_skb(skb);
   return ret;
 }
@@ -227,64 +247,113 @@ static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *s
 static enum fsm_state fsm_c_rsstreq_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
   enum fsm_state ret;
-  struct create_rsst_state state;
-  state.cur_id = 1;
-  state.cur_obs = NULL;
 
   switch (mason_type(skb)) {
   case MASON_RSSTREQ:
-    del_fsm_timer(&rnd->timer);
-    if (pskb_may_pull(skb, sizeof(struct rsstreq_masonpkt))
-	&& mason_rsstreq_id(skb) == rnd->my_id) {
-      while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
-      reset_rnd_info(rnd);
-      ret = fsm_idle;
-    } else { 
-      mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
-      ret = fsm_c_rsstreq;
-    }
+    ret = handle_rsstreq(rnd, skb);
+    break;
   default:
     ret = fsm_c_rsstreq;
+    break;
   }
+  
   kfree_skb(skb);
   return ret;
 }
 
-static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb)
+static enum fsm_state fsm_s_abort(struct rnd_info *rnd)
 {
-  unsigned char *hwaddr = NULL;
-
-  switch (mason_type(skb)) {
-  case MASON_PAR:
-    if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
-      goto out;
-    if (rnd->tbl->max_id < MAX_PARTICIPANTS - 1) {
-      hwaddr = copy_hwaddr(skb);
-      if (!hwaddr  || (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb), hwaddr))) {
-	mason_logd("failed to add identity from PAR packet");
-	if (hwaddr)
-	  kfree(hwaddr);
-	goto abort;
-      }
-      goto out;
-    } else {
-      mason_logd("participant limit exceeded.  aborting");
-      goto abort;
-    }
-  default:
-    goto out;
-  }
-  
- out:
-  kfree_skb(skb);
-  return fsm_s_par; 
-  
- abort:
   mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   reset_rnd_info(rnd);
-  kfree_skb(skb);
   return fsm_idle;
+}
+
+static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
+    return fsm_s_par;
+
+  if (MAX_PARTICIPANTS - 1 == rnd->tbl->max_id) {
+    mason_logd("participant limit exceeded");
+    return fsm_s_abort(rnd);
+  }
+  
+  if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
+      || 0 > set_identity_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
+    mason_logd("failed to add identity from PAR packet");
+    return fsm_s_abort(rnd);
+  }
+  
+  return fsm_s_par;
+}
+
+static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  if (mason_sender_id(skb) != rnd->txreq_id) 
+    return fsm_s_meas;
+  
+  del_fsm_timer(&rnd->timer);
+  record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
+  return handle_next_txreq(rnd);
+}
+
+static enum fsm_state handle_rsst(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  if (!pskb_may_pull(skb, sizeof(struct rsst_masonpkt)))
+    return fsm_s_rsst;
+  
+  import_mason_rsst(rnd, skb);
+  return handle_next_rsstreq(rnd, mason_rsst_is_frag(skb));
+}
+
+static enum fsm_state handle_next_txreq(struct rnd_info *rnd)
+{
+  /* Send next txreq if needed */
+  if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
+    if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd))))
+      return fsm_s_abort(rnd);
+    mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
+    return fsm_s_meas;
+  }
+
+  /* Otherwise, start the rsstreqs */  
+  rnd->txreq_id = 1;
+  return handle_next_rsstreq(rnd, 1);
+}
+
+static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned char cont)
+{
+  if (!cont)
+    ++rnd->txreq_id;
+
+  if (rnd->txreq_id > rnd->tbl->max_id) {
+    mason_logi("Finished round:%u", rnd->rnd_id);
+    reset_rnd_info(rnd); /* Finished */
+    return fsm_idle;
+  }
+
+  if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
+    return fsm_s_abort(rnd);
+  mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
+  return fsm_s_rsst;
+}
+
+static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  enum fsm_state ret;
+
+  switch (mason_type(skb)) {
+  case MASON_PAR:
+    ret = handle_par(rnd, skb);
+    break;
+  default:
+    ret = fsm_s_par;
+    break;
+  }
+  
+  kfree_skb(skb);
+  return ret;   
 }
 
 static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb)
@@ -293,166 +362,71 @@ static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *sk
 
   switch(mason_type(skb)) {
   case MASON_MEAS :
-    if (mason_sender_id(skb) != rnd->txreq_id) {
-      ret = fsm_s_meas;
-      goto out;
-    } 
-    del_fsm_timer(&rnd->timer);
-    record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
-    
-    if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
-      if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd))))
-	goto abort;
-      mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
-      ret = fsm_s_meas;
-      goto out;
-    } else {
-      rnd->txreq_id = 1;
-      if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
-	goto abort;
-      mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
-      ret = fsm_s_rsst;
-      goto out;
-    }
+    ret = handle_s_meas(rnd, skb);
+    break;
   default:
     ret = fsm_s_meas;
-    goto out;
+    break;
   }
 
- abort:
-  mason_logd("aborting");
-  bcast_mason_packet(create_mason_abort(rnd));
-  reset_rnd_info(rnd);
-  ret = fsm_idle;
-  
- out:
   kfree_skb(skb);
   return ret;
 }
 
 static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  struct rsst_masonpkt  *typehdr;
+  enum fsm_state ret;
   
   switch (mason_type(skb)) {
   case MASON_RSST:
-    typehdr = (struct rsst_masonpkt *)mason_typehdr(skb);
-    
-    import_mason_rsst(rnd, skb);
-    
-    if (!typehdr->frag) {
-      if (++rnd->txreq_id > rnd->tbl->max_id) {
-	mason_logd("initiator finished round");
-	goto finish;
-      }
-      if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
-	goto abort;
-    }
-    mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
-    kfree_skb(skb);
-    return fsm_s_rsst;
-    
-  abort:
-    mason_logd("aborting");
-    bcast_mason_packet(create_mason_abort(rnd));
-    
-  finish:
-    reset_rnd_info(rnd);
-    kfree_skb(skb);
-    return fsm_idle;  
-    
+    ret = handle_rsst(rnd, skb);
+    break;
   default:
-    kfree_skb(skb);
-    return fsm_s_rsst;
+    ret = fsm_s_rsst;
   }
+  
+  kfree_skb(skb);
+  return ret;
 }
 
 static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data)
 {
   mason_loge("fsm received timeout input while in idle state. This should not occur");
-  return fsm_idle; /* We're already in idle, so ignore any errant timeouts */
+  return fsm_idle;
 }
 
 static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data)
 {
-  mason_logd("client timed out");
-  mason_logd("aborting");
-  reset_rnd_info(rnd);
-  return fsm_idle;
+  return fsm_c_abort(rnd);
 }
 
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data)
 {
   enum fsm_state ret;
   __u16 cur_id = 1;
-
+  
   mason_logd("initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
-    if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd)))) {
-      mason_loge("failed to send TXREQ packet");
-      goto abort;
-    }
-    mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
-    ret = fsm_s_meas;
-    goto out;
+    ret = handle_next_txreq(rnd);
   } else {
     mason_logd("not enough participants");
-    goto abort;
+    ret = fsm_s_abort(rnd);
   }
-
- abort:
-  mason_logd("aborting");
-  bcast_mason_packet(create_mason_abort(rnd));
-  reset_rnd_info(rnd);
-  ret = fsm_idle; 
   
- out:
   return ret;
 }
 
 static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data)
 {
   mason_logd("initiator timed out while waiting for MEAS packet");
-  if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
-    if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd)))) 
-      goto abort;
-    mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
-    return fsm_s_meas;
-  } else {
-    rnd->txreq_id = 1;
-    if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
-      goto abort;
-    mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
-    return fsm_s_rsst;
-  }
-  
- abort:
-  mason_logd("aborting");
-  bcast_mason_packet(create_mason_abort(rnd));
-  reset_rnd_info(rnd);
-  return fsm_idle;
-}
+  return handle_next_txreq(rnd);  
+}  
 
 static enum fsm_state fsm_s_rsst_timeout(struct rnd_info *rnd, long data)
 {
   mason_logd("initiator timed out while waiting for RSST packet");
-  if (++rnd->txreq_id > rnd->tbl->max_id) {
-    mason_logd("initiator finished round");
-    reset_rnd_info(rnd);
-    return fsm_idle;
-  }
-  
-  if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
-    goto abort;
-  mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
-  return fsm_s_rsst;
-
- abort:
-  mason_logd("aborting");
-  bcast_mason_packet(create_mason_abort(rnd));
-  reset_rnd_info(rnd);
-  return fsm_idle;  
+  return handle_next_rsstreq(rnd, 0);
 }
 
 static enum fsm_state fsm_idle_quit(struct rnd_info *rnd)
@@ -1164,7 +1138,7 @@ static void free_identity(struct masonid *ptr)
   kfree(ptr);
 }
 
-static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, unsigned char* hwaddr)
+static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 {
   struct id_table *tbl;
   struct masonid *id;
@@ -1180,13 +1154,12 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, un
     mason_loge("failed to allocate memory for 'struct masonid'");
     return -ENOMEM;
   }
-  tbl->ids[sender_id] = id;
-
   id->id = sender_id;
   memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
   id->head = NULL;
-  id->hwaddr = hwaddr;
+    id->hwaddr = NULL;
 
+  tbl->ids[sender_id] = id;
   if (rnd->tbl->max_id < sender_id)
     rnd->tbl->max_id = sender_id;
   
@@ -1198,6 +1171,13 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key, un
   mason_logd("added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
 	     rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
   return 0;
+}
+
+static int set_identity_hwaddr(struct masonid *id, const struct sk_buff *skb)
+{
+  if (!id->hwaddr && !(id->hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC)))
+    return -ENOMEM;  
+  return dev_parse_header(skb, id->hwaddr);
 }
 
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi)
@@ -1221,17 +1201,6 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   msnid->head = obs;
   
   mason_logd("recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
-}
-
-static unsigned char *copy_hwaddr(struct sk_buff *skb) 
-{
-  unsigned char *copy;
-  copy = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
-  if (copy 
-      && dev_parse_header(skb, copy)) 
-    return copy;
-  else
-    return NULL;
 }
 
 /* **************************************************************
