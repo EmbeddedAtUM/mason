@@ -14,10 +14,9 @@
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/random.h>
-#include <linux/rcupdate.h>
 #include <linux/spinlock.h>
+#include <linux/rculist.h>
 #include <net/net_namespace.h>
-
 
 #include "if_mason.h"
 #include "mason.h"
@@ -1061,13 +1060,32 @@ static void fsm_init(struct fsm *fsm) {
   fsm->cur_state = fsm_idle;
 };
 
-
-static void free_fsm(struct fsm *ptr)
+static void del_fsm(struct fsm *fsm) 
 {
-  del_fsm(ptr);
-  kfree(ptr);
+  spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);
+  list_del_rcu(&fsm->fsm_list);
+  spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);
+  call_rcu(&fsm->rcu, __del_fsm_callback);
 }
-   
+
+static void __del_fsm_callback(struct rcu_head *rp)
+{
+  __free_fsm(container_of(rp, struct fsm, rcu));
+}
+
+/*
+ * This should be called in or after the update phase of the fsm_list
+ * rcu delete.  To ensure all references are gone, we must cancel the
+ * timer and empty the dispatch queue.
+ */
+static void __free_fsm(struct fsm *fsm)
+{
+  del_fsm_timer(&fsm->rnd->timer);
+  flush_workqueue(dispatch_wq);
+  free_rnd_info(fsm->rnd);
+  kfree(fsm);
+}
+
 static void free_rssi_obs_list(struct rssi_obs *head)
 {
   struct rssi_obs *next = head;
@@ -1184,7 +1202,8 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
   mason_logd("received %s packet for round:%u", mason_type_str(skb), mason_round_id(skb));
 
   /* Deliver the packet to each fsm */
-  list_for_each_entry( fsm, &fsm_list, fsm_list) {
+  rcu_read_lock();
+  list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {
     /* Optimization for TXREQ packets.
      * Only pass the packet to the FSM if the request ID matches that of this FSM
      */
@@ -1213,6 +1232,7 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
     else
       kfree(input);
   }
+  rcu_read_unlock();
   
  free_skb:
   kfree_skb(skb);
@@ -1293,28 +1313,30 @@ static int __init mason_init(void)
 
 static void __exit mason_exit(void)
 {
-  struct fsm *fsm, *tmp;
+  struct fsm *fsm;
 
   mason_logi("Unloading Mason Protocol module");
 
   /* Prevent new dispatches */
   dev_remove_pack(&mason_packet_type);
-  list_for_each_entry(fsm, &fsm_list, fsm_list) {
+  rcu_read_lock();
+  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
     del_fsm_timer(&fsm->rnd->timer);
   }
-  
+  rcu_read_unlock();
+
   /* Ensures all pending dispatches are dispatched. */
   destroy_workqueue(dispatch_wq);
   
   /* TODO: All init FSMs should send an abort */
   
   /* Free all the fsms */
-  list_for_each_entry_safe(fsm, tmp, &fsm_list, fsm_list) {
-    if (fsm->rnd)
-      free_rnd_info(fsm->rnd);
-    free_fsm(fsm);
+  rcu_read_lock();
+  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
+    del_fsm(fsm);
   }
-
+  rcu_read_unlock();
+  
   if (mason_dev)
     dev_put(mason_dev);
 }

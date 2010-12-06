@@ -10,9 +10,10 @@
 #ifndef _MASON_H
 #define _MASON_H
 
-#include <linux/netdevice.h>
-#include <linux/spinlock.h>
+#include <linux/rcupdate.h>
+#include <linux/semaphore.h>
 #include <linux/list.h>
+#include <linux/netdevice.h>
 
 #define MIN_PARTICIPANTS 1
 #define MAX_PARTICIPANTS 400
@@ -47,6 +48,7 @@ enum fsm_input_type {
 struct rnd_info;
 struct fsm {
   struct list_head fsm_list;
+  struct rcu_head  rcu;
   struct semaphore sem;
   enum fsm_state cur_state;
   struct rnd_info *rnd;
@@ -67,16 +69,16 @@ struct fsm_dispatch {
 
 static struct fsm *new_fsm(void);
 static void fsm_init(struct fsm *fsm);
-static void free_fsm(struct fsm *ptr);
+static void del_fsm(struct fsm *fsm);
+static void __del_fsm_callback(struct rcu_head *rp);
+static void __free_fsm(struct fsm *fsm);
 
 #define add_fsm(ptr) do {spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
-    list_add(&ptr->fsm_list, &fsm_list);				\
+    list_add_rcu(&ptr->fsm_list, &fsm_list);				\
     spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);		\
   } while(0)
-#define del_fsm(ptr) do {spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
-    list_del(&ptr->fsm_list);						\
-    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);		\
-  } while(0)
+
+
 #define FIRST_FSM list_first_entry(&fsm_list, struct fsm, fsm_list)
 
 static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
