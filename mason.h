@@ -104,6 +104,7 @@ static inline void del_fsm_timer(struct fsm *fsm)
  * ************************************************************** */
 static void fsm_init(struct fsm *fsm);
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *));
+static void del_fsm_all(void);
 static void __del_fsm_callback(struct rcu_head *rp);
 static void __free_fsm(struct fsm *fsm);
 

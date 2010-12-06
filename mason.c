@@ -1056,6 +1056,29 @@ static void fsm_init(struct fsm *fsm) {
   }
 };
 
+static void del_fsm_all(void)
+{
+  struct fsm *fsm;
+
+  rcu_read_lock();
+  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
+    del_fsm_timer(fsm);
+  }
+  rcu_read_unlock();
+
+  /* Ensures all pending dispatches are dispatched. */
+  destroy_workqueue(dispatch_wq);
+  
+  /* TODO: All init FSMs should send an abort */
+  
+  /* Free all the fsms */
+  rcu_read_lock();
+  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
+    del_fsm(fsm, free_rnd_info);
+  }
+  rcu_read_unlock();
+}
+
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *)) 
 {
   spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);
@@ -1311,29 +1334,10 @@ static int __init mason_init(void)
 
 static void __exit mason_exit(void)
 {
-  struct fsm *fsm;
 
   mason_logi("Unloading Mason Protocol module");
-
-  /* Prevent new dispatches */
   dev_remove_pack(&mason_packet_type);
-  rcu_read_lock();
-  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
-    del_fsm_timer(fsm);
-  }
-  rcu_read_unlock();
-
-  /* Ensures all pending dispatches are dispatched. */
-  destroy_workqueue(dispatch_wq);
-  
-  /* TODO: All init FSMs should send an abort */
-  
-  /* Free all the fsms */
-  rcu_read_lock();
-  list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
-    del_fsm(fsm, free_rnd_info);
-  }
-  rcu_read_unlock();
+  del_fsm_all();
   
   if (mason_dev)
     dev_put(mason_dev);
