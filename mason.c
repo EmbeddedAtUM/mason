@@ -80,7 +80,7 @@ static enum fsm_state fsm_idle_packet(struct fsm *fsm, struct sk_buff *skb)
     /* Send PAR message */
     if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
       goto err;
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+    mod_fsm_timer(fsm, CLIENT_TIMEOUT);
     ret = fsm_c_parlist;
     goto out;
   default:
@@ -139,28 +139,28 @@ static __u16 select_next_txreq_id(struct rnd_info *rnd)
 
 static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  del_fsm_timer(&rnd->timer);
+  del_fsm_timer(&rnd->fsm);
   import_mason_parlist(rnd, skb);
-  mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+  mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   return fsm_c_parlist;
 }
 
 static enum fsm_state handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 {
   if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))) {
-    del_fsm_timer(&rnd->timer);
+    del_fsm_timer(&rnd->fsm);
     if (mason_txreq_id(skb) == rnd->my_id)
       bcast_mason_packet(create_mason_meas(rnd));
-    mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+    mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   }
   return fsm_c_txreq;
 }
 
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb)
 {
-  del_fsm_timer(&rnd->timer);
+  del_fsm_timer(&rnd->fsm);
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
-  mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+  mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   return fsm_c_txreq;
 }
 
@@ -172,14 +172,14 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
   };
   
   if (pskb_may_pull(skb, sizeof(struct rsstreq_masonpkt))) {
-    del_fsm_timer(&rnd->timer);
+    del_fsm_timer(&rnd->fsm);
     if (mason_rsstreq_id(skb) == rnd->my_id) {
       while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
       mason_logi("Finished round:%u", rnd->rnd_id);
       reset_rnd_info(rnd);
       return fsm_idle;
     } else {
-      mod_fsm_timer(&rnd->timer, CLIENT_TIMEOUT);
+      mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
       return fsm_c_rsstreq;
     }
   }
@@ -301,7 +301,7 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
   if (mason_sender_id(skb) != rnd->txreq_id) 
     return fsm_s_meas;
   
-  del_fsm_timer(&rnd->timer);
+  del_fsm_timer(&rnd->fsm);
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
   return handle_next_txreq(rnd);
 }
@@ -321,7 +321,7 @@ static enum fsm_state handle_next_txreq(struct rnd_info *rnd)
   if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
     if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd))))
       return fsm_s_abort(rnd);
-    mod_fsm_timer(&rnd->timer, MEAS_TIMEOUT);
+    mod_fsm_timer(&rnd->fsm, MEAS_TIMEOUT);
     return fsm_s_meas;
   }
 
@@ -343,7 +343,7 @@ static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned c
 
   if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
     return fsm_s_abort(rnd);
-  mod_fsm_timer(&rnd->timer, RSST_TIMEOUT);
+  mod_fsm_timer(&rnd->fsm, RSST_TIMEOUT);
   return fsm_s_rsst;
 }
 
@@ -462,7 +462,7 @@ static enum fsm_state fsm_idle_initiate(struct fsm *fsm)
     return fsm_idle;
   
   mason_logd("setting timer delay to PAR_TIMEOUT");
-  mod_fsm_timer(&rnd->timer, PAR_TIMEOUT);
+  mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
   return fsm_s_par;
 }
 
@@ -592,12 +592,11 @@ static void fsm_timer_callback(unsigned long data)
     return;
   input->type = fsm_timeout;
   input->data.data = data;
-  fsm_dispatch_interrupt(&timer->rnd->fsm, input);
+  fsm_dispatch_interrupt(container_of(timer, struct fsm, timer), input);
 }
 
-static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd)
+static void init_fsm_timer(struct fsm_timer *timer)
 {
-  timer->rnd = rnd;
   timer->idx = 1;
   timer->expired_idx = 0;
   setup_timer(&timer->tl, fsm_timer_callback, (unsigned long) timer);
@@ -988,7 +987,6 @@ static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
   ptr->pkt_id = 0;
   ptr->txreq_id = 0;
   ptr->txreq_cnt = 0;
-  init_fsm_timer(&ptr->timer, ptr);
   fsm_init(&ptr->fsm);
   return ptr;
   
@@ -1008,7 +1006,7 @@ static struct rnd_info *new_rnd_info(void)
 
 static void reset_rnd_info(struct rnd_info *rnd)
 {
-  del_fsm_timer(&rnd->timer);
+  del_fsm_timer(&rnd->fsm);
   if (rnd->tbl)
     free_id_table(rnd->tbl);
 
@@ -1024,7 +1022,7 @@ static void free_rnd_info(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
   
-  del_fsm_timer(&rnd->timer);
+  del_fsm_timer(fsm);
   if (rnd->tbl)
     free_id_table(rnd->tbl);
   
@@ -1050,9 +1048,12 @@ static void free_id_table(struct id_table *ptr)
 }
 
 static void fsm_init(struct fsm *fsm) {
-  add_fsm(fsm);
-  sema_init(&fsm->sem, 1);
-  fsm->cur_state = fsm_idle;
+  if (fsm) {
+    add_fsm(fsm);
+    sema_init(&fsm->sem, 1);
+    init_fsm_timer(&fsm->timer);
+    fsm->cur_state = fsm_idle;
+  }
 };
 
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *)) 
@@ -1076,7 +1077,7 @@ static void __del_fsm_callback(struct rcu_head *rp)
  */
 static void __free_fsm(struct fsm *fsm)
 {
-  del_fsm_timer(&container_of(fsm, struct rnd_info, fsm)->timer);
+  del_fsm_timer(fsm);
   flush_workqueue(dispatch_wq);
   fsm->__free_child(fsm);
 }
@@ -1318,7 +1319,7 @@ static void __exit mason_exit(void)
   dev_remove_pack(&mason_packet_type);
   rcu_read_lock();
   list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
-    del_fsm_timer(&container_of(fsm, struct rnd_info, fsm)->timer);
+    del_fsm_timer(fsm);
   }
   rcu_read_unlock();
 

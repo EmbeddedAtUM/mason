@@ -25,9 +25,20 @@
 
 #define TXREQ_PER_ID_AVG 4
 
-/* **************************************************************
- *    State Machine Declarations
- * ************************************************************** */
+struct fsm_timer {
+  struct timer_list tl;
+  unsigned long idx;
+  unsigned long expired_idx; /* When the timer expires, this is set to
+				idx.  If the timer is re-added before
+				the fsm_input corresponding to the
+				expiry is processed, then, at the time
+				of processing, idx > expired_idx.  If
+				idx==expired_idx, the timer has not
+				been reset.  In most cases, if idx >
+				expired_idx, then the timeout should
+				be ignored. */  
+};
+
 enum fsm_state {
   fsm_idle      = 0,
   fsm_c_parlist = 1,
@@ -51,6 +62,7 @@ struct fsm {
   struct rcu_head  rcu;
   struct semaphore sem;
   enum fsm_state cur_state;
+  struct fsm_timer timer;
   void (*__free_child)(struct fsm *);
 };
 
@@ -67,6 +79,29 @@ struct fsm_dispatch {
   struct fsm_input *input;
 };
 
+/* **************************************************************
+ * Timers
+ * ************************************************************** */
+static void fsm_timer_callback(unsigned long data);
+static void init_fsm_timer(struct fsm_timer *timer);
+
+static inline void mod_fsm_timer(struct fsm *fsm, unsigned long msec)
+{
+  if (fsm) {
+    ++fsm->timer.idx;
+    mod_timer(&fsm->timer.tl, jiffies + msecs_to_jiffies(msec));
+  }
+}
+
+static inline void del_fsm_timer(struct fsm *fsm)
+{
+  if (fsm)
+    del_timer(&fsm->timer.tl);
+}
+
+/* **************************************************************
+ *    State Machine Declarations
+ * ************************************************************** */
 static void fsm_init(struct fsm *fsm);
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *));
 static void __del_fsm_callback(struct rcu_head *rp);
@@ -113,39 +148,6 @@ static enum fsm_state handle_next_txreq(struct rnd_info *rnd);
 static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned char cont);
 static enum fsm_state fsm_s_abort(struct rnd_info *rnd);
 
-/* **************************************************************
- * Timers
- * ************************************************************** */
-struct rnd_info;
-struct fsm_timer {
-  struct timer_list tl;
-  unsigned long idx;
-  unsigned long expired_idx; /* When the timer expires, this is set to
-				idx.  If the timer is re-added before
-				the fsm_input corresponding to the
-				expiry is processed, then, at the time
-				of processing, idx > expired_idx.  If
-				idx==expired_idx, the timer has not
-				been reset.  In most cases, if idx >
-				expired_idx, then the timeout should
-				be ignored. */
-  struct rnd_info *rnd;
-  
-};
-
-static void fsm_timer_callback(unsigned long data);
-static void init_fsm_timer(struct fsm_timer *timer, struct rnd_info *rnd);
-
-static inline void mod_fsm_timer(struct fsm_timer *timer, unsigned long msec)
-{
-  ++timer->idx;
-  mod_timer(&timer->tl, jiffies + msecs_to_jiffies(msec));
-}
-
-static inline void del_fsm_timer(struct fsm_timer *timer)
-{
-  del_timer(&timer->tl);
-}
 
 /* **************************************************************
  * Debug methods
@@ -206,7 +208,6 @@ struct rnd_info {
   __u16 txreq_cnt; 
   struct net_device *dev;
   struct id_table *tbl;
-  struct fsm_timer timer;
 };
 
 static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev)
