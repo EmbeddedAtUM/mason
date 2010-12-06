@@ -430,41 +430,6 @@ static enum fsm_state fsm_s_rsst_timeout(struct rnd_info *rnd, long data)
   return handle_next_rsstreq(rnd, 0);
 }
 
-static enum fsm_state fsm_idle_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_c_parlist_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_c_txreq_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_c_rsstreq_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_s_par_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_s_meas_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
-static enum fsm_state fsm_s_rsst_quit(struct rnd_info *rnd)
-{
-  return fsm_idle; /* TODO: Implement this handler */
-}
-
 static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd)
 {
   /* Configure the round id */
@@ -511,17 +476,6 @@ static enum fsm_state (*fsm_timeout_trans[])(struct rnd_info *, long)  = {
 };
 
 /* Functions must be ordered same as fsm_state enum declaration */
-static enum fsm_state (*fsm_quit_trans[])(struct rnd_info *) = {
-  &fsm_idle_quit,
-  &fsm_c_parlist_quit,
-  &fsm_c_txreq_quit,
-  &fsm_c_rsstreq_quit,
-  &fsm_s_par_quit,
-  &fsm_s_meas_quit,
-  &fsm_s_rsst_quit,
-};
-
-/* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_initiate_trans[])(struct rnd_info *) = {
   &fsm_idle_initiate,
   NULL,
@@ -545,10 +499,6 @@ static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
     timer = (struct fsm_timer *) input->data.data;
     if ( (timer->idx == timer->expired_idx) && fsm_timeout_trans[fsm->cur_state])
       fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm->rnd, input->data.data);
-    break;
-  case fsm_quit :
-    if (fsm_quit_trans[fsm->cur_state])
-      fsm->cur_state = fsm_quit_trans[fsm->cur_state](fsm->rnd);
     break;
   case fsm_initiate :
     if (fsm_initiate_trans[fsm->cur_state])

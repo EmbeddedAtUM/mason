@@ -41,7 +41,6 @@ enum fsm_state {
 enum fsm_input_type {
   fsm_packet  = 0,
   fsm_timeout = 1,
-  fsm_quit    = 2,
   fsm_initiate = 3
 };
 
@@ -101,14 +100,6 @@ static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data);
 static enum fsm_state fsm_s_rsst_timeout(struct rnd_info *rnd, long data);
-
-static enum fsm_state fsm_idle_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_c_parlist_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_c_txreq_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_c_rsstreq_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_s_par_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_s_meas_quit(struct rnd_info *rnd);
-static enum fsm_state fsm_s_rsst_quit(struct rnd_info *rnd);
 
 static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd);
 
