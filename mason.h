@@ -68,6 +68,15 @@ struct fsm_dispatch {
 static struct fsm *new_fsm(void);
 static void fsm_init(struct fsm *fsm);
 static void free_fsm(struct fsm *ptr);
+
+#define add_fsm(ptr) do {spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
+    list_add(&ptr->fsm_list, &fsm_list);				\
+    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);		\
+  } while(0)
+#define del_fsm(ptr) do {spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
+    list_del(&ptr->fsm_list);						\
+    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);		\
+  } while(0)
 #define FIRST_FSM list_first_entry(&fsm_list, struct fsm, fsm_list)
 
 static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);

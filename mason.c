@@ -14,6 +14,8 @@
 #include <linux/netdevice.h>
 #include <linux/skbuff.h>
 #include <linux/random.h>
+#include <linux/rcupdate.h>
+#include <linux/spinlock.h>
 #include <net/net_namespace.h>
 
 
@@ -41,6 +43,8 @@ MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 static struct net_device *mason_dev;
 static struct workqueue_struct *dispatch_wq;
 static LIST_HEAD(fsm_list);
+static DEFINE_SPINLOCK(fsm_list_lock);
+static unsigned long fsm_list_flags;
 
 /* **************************************************************
  * State Machine transition functions
@@ -1052,7 +1056,7 @@ static struct fsm *new_fsm(void)
 }
 
 static void fsm_init(struct fsm *fsm) {
-  list_add(&fsm->fsm_list, &fsm_list);
+  add_fsm(fsm);
   sema_init(&fsm->sem, 1);
   fsm->cur_state = fsm_idle;
 };
@@ -1060,7 +1064,7 @@ static void fsm_init(struct fsm *fsm) {
 
 static void free_fsm(struct fsm *ptr)
 {
-  list_del(&ptr->fsm_list);
+  del_fsm(ptr);
   kfree(ptr);
 }
    
