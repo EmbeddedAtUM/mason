@@ -36,7 +36,7 @@ module_param(iface, charp, S_IRUGO);
 MODULE_PARM_DESC(iface, "Interface on which to initiate Mason tests. Default is 'tiwlan0'.\n");
 
 static short int numids = 1;
-module_param(numids, short, S_IRUGO);
+module_param(numids, short, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 
 static struct net_device *mason_dev;
