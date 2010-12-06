@@ -79,6 +79,7 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
 	goto err;
       mod_fsm_timer(fsm, CLIENT_TIMEOUT);
       ret = fsm_c_parlist;
+      mason_logi("joining round: %u", rnd->rnd_id);
       goto out;
     default:
       goto err;
@@ -192,13 +193,13 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
 
 static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd)
 {
-  mason_logd("aborting");
+  mason_logi("aborting");
   return fsm_c_finish(rnd);
 }
 
 static enum fsm_state fsm_c_finish(struct rnd_info *rnd)
 {
-  mason_logd("Finished round:%u", rnd->rnd_id);
+  mason_logi("finished round: %u", rnd->rnd_id);
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
 }
@@ -278,14 +279,14 @@ static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb)
 
 static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd)
 {
-  mason_logd("aborting");
+  mason_logi("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
   return fsm_s_finish(rnd);
 }
 
 static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
 {
-  mason_logd("Finished round:%u", rnd->rnd_id);
+  mason_logi("finished round: %u", rnd->rnd_id);
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
 }
@@ -425,6 +426,7 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
   
   mason_logd("initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
+    mason_logi("total participants: %u", rnd->tbl->max_id);
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
     ret = handle_next_txreq(rnd);
   } else {
@@ -463,6 +465,8 @@ static void fsm_start_initiator(struct fsm *fsm)
   get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
   dev_hold(mason_dev);
   rnd->dev = mason_dev;
+  
+  mason_logi("initiating round: %u", rnd->rnd_id);
   
   /* Send the INIT packet */
   if (0 != bcast_mason_packet(create_mason_init(rnd))) {
