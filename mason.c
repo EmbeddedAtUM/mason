@@ -48,54 +48,58 @@ static unsigned long fsm_list_flags;
 /* **************************************************************
  * State Machine transition functions
  * ************************************************************** */
-static enum fsm_state fsm_idle_packet(struct fsm *fsm, struct sk_buff *skb)
+static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
 {
   GET_RND_INFO(fsm, rnd);
   enum fsm_state ret;
-
-  switch (mason_type(skb)) {
-  case MASON_INIT:
-    if (!pskb_may_pull(skb, sizeof(struct init_masonpkt))) {
-      ret = fsm_idle;
+  
+  if (0 == down_interruptible(&fsm->sem)) {
+    switch (mason_type(skb)) {
+    case MASON_INIT:
+      if (!pskb_may_pull(skb, sizeof(struct init_masonpkt))) 
+	goto err;
+      
+      if (0 != mason_sender_id(skb)) 
+	goto err;
+      
+      /* Save info from packet */
+      rnd_info_set_dev(rnd, skb->dev);
+      rnd->rnd_id = mason_round_id(skb);
+      if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
+	  || 0 > set_identity_hwaddr(rnd->tbl->ids[0], skb)) {
+	mason_logd("failed to add identity of initiator");
+	goto err;
+      }
+      
+      /* Set the public key */
+      get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));      
+      
+      /* Send PAR message */
+      if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
+	goto err;
+      mod_fsm_timer(fsm, CLIENT_TIMEOUT);
+      ret = fsm_c_parlist;
       goto out;
-    }
-
-    if (0 != mason_sender_id(skb)) {
-      ret = fsm_idle;
-      goto out;
-    }
-
-    /* Save info from packet */
-    rnd_info_set_dev(rnd, skb->dev);
-    rnd->rnd_id = mason_round_id(skb);
-    if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
-	|| 0 > set_identity_hwaddr(rnd->tbl->ids[0], skb)) {
-      mason_logd("failed to add identity of initiator");
+    default:
       goto err;
     }
-    
-    /* Set the public key */
-    get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));      
-
-    /* Send PAR message */
-    if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
-      goto err;
-    mod_fsm_timer(fsm, CLIENT_TIMEOUT);
-    ret = fsm_c_parlist;
-    goto out;
-  default:
-    ret = fsm_idle;
-    goto out;
+  } else {
+    del_fsm(fsm, free_rnd_info);
+    goto free_skb;
   }
   
  err:
-  reset_rnd_info(rnd);
-  ret = fsm_idle;  
+  del_fsm(fsm, free_rnd_info);
+  ret = fsm_term;  
   
  out:
-  kfree_skb(skb);
-  return ret;
+  fsm->cur_state = ret;
+  up(&fsm->sem);
+  
+ free_skb:
+  kfree_skb(skb);  
 }
+
 
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 {
@@ -175,9 +179,7 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
     del_fsm_timer(&rnd->fsm);
     if (mason_rsstreq_id(skb) == rnd->my_id) {
       while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
-      mason_logi("Finished round:%u", rnd->rnd_id);
-      reset_rnd_info(rnd);
-      return fsm_idle;
+      return fsm_c_finish(rnd);
     } else {
       mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
       return fsm_c_rsstreq;
@@ -185,15 +187,20 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
   }
   else {
     return fsm_c_rsstreq;
-  }
-  
+  } 
 }
 
-static enum fsm_state fsm_c_abort(struct rnd_info *rnd)
+static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd)
 {
   mason_logd("aborting");
-  reset_rnd_info(rnd);
-  return fsm_idle;
+  return fsm_c_finish(rnd);
+}
+
+static enum fsm_state fsm_c_finish(struct rnd_info *rnd)
+{
+  mason_logd("Finished round:%u", rnd->rnd_id);
+  del_fsm(&rnd->fsm, free_rnd_info);
+  return fsm_term;
 }
 
 static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb)
@@ -218,7 +225,7 @@ static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb)
     ret = fsm_c_parlist;
     break;
   }
-  
+
   kfree_skb(skb);
   return ret; 
 }
@@ -269,12 +276,18 @@ static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb)
   return ret;
 }
 
-static enum fsm_state fsm_s_abort(struct rnd_info *rnd)
+static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd)
 {
   mason_logd("aborting");
   bcast_mason_packet(create_mason_abort(rnd));
-  reset_rnd_info(rnd);
-  return fsm_idle;
+  return fsm_s_finish(rnd);
+}
+
+static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
+{
+  mason_logd("Finished round:%u", rnd->rnd_id);
+  del_fsm(&rnd->fsm, free_rnd_info);
+  return fsm_term;
 }
 
 static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
@@ -336,9 +349,7 @@ static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned c
     ++rnd->txreq_id;
 
   if (rnd->txreq_id > rnd->tbl->max_id) {
-    mason_logi("Finished round:%u", rnd->rnd_id);
-    reset_rnd_info(rnd); /* Finished */
-    return fsm_idle;
+    return fsm_s_finish(rnd);
   }
 
   if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
@@ -400,12 +411,6 @@ static enum fsm_state fsm_s_rsst_packet(struct fsm *fsm, struct sk_buff *skb)
   return ret;
 }
 
-static enum fsm_state fsm_idle_timeout(struct fsm *fsm)
-{
-  mason_loge("fsm received timeout input while in idle state. This should not occur");
-  return fsm_idle;
-}
-
 static enum fsm_state fsm_client_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
@@ -444,10 +449,12 @@ static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm)
   return handle_next_rsstreq(rnd, 0);
 }
 
-static enum fsm_state fsm_idle_initiate(struct fsm *fsm)
+static void fsm_start_initiator(struct fsm *fsm)
 {
+  enum fsm_state ret;
   GET_RND_INFO(fsm, rnd);
 
+  if (0 == down_interruptible(&fsm->sem)) {
   /* Configure the round id */
   rnd->my_id = 0;
   rnd->tbl->max_id = 0;
@@ -458,12 +465,22 @@ static enum fsm_state fsm_idle_initiate(struct fsm *fsm)
   rnd->dev = mason_dev;
   
   /* Send the INIT packet */
-  if (0 != bcast_mason_packet(create_mason_init(rnd)))
-    return fsm_idle;
+  if (0 != bcast_mason_packet(create_mason_init(rnd))) {
+    mason_logd();
+    ret = fsm_s_abort(rnd);
+  } else {
+    mason_logd("setting timer delay to PAR_TIMEOUT");
+    mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
+    ret = fsm_s_par;
+  }
   
-  mason_logd("setting timer delay to PAR_TIMEOUT");
-  mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
-  return fsm_s_par;
+  fsm->cur_state = ret;
+  up(&fsm->sem);
+  } else {
+    mason_logd("Unabled to send INIT message");
+    del_fsm(fsm, free_rnd_info);
+    ret = fsm_term;
+  }
 }
 
 /* **************************************************************
@@ -471,35 +488,26 @@ static enum fsm_state fsm_idle_initiate(struct fsm *fsm)
  * ************************************************************** */
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_packet_trans[])(struct fsm *fsm, struct sk_buff *) = {
-  &fsm_idle_packet,
+  NULL,
   &fsm_c_parlist_packet,
   &fsm_c_txreq_packet,
   &fsm_c_rsstreq_packet,
   &fsm_s_par_packet,
   &fsm_s_meas_packet,
   &fsm_s_rsst_packet,
+  NULL
 };
 
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_timeout_trans[])(struct fsm *fsm)  = {
-  &fsm_idle_timeout,
+  NULL,
   &fsm_client_timeout,
   &fsm_client_timeout,
   &fsm_client_timeout,
   &fsm_s_par_timeout,
   &fsm_s_meas_timeout,
   &fsm_s_rsst_timeout,
-};
-
-/* Functions must be ordered same as fsm_state enum declaration */
-static enum fsm_state (*fsm_initiate_trans[])(struct fsm *fsm) = {
-  &fsm_idle_initiate,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
-  NULL,
+  NULL
 };
 
 static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
@@ -515,10 +523,6 @@ static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
     timer = (struct fsm_timer *) input->data.data;
     if ( (timer->idx == timer->expired_idx) && fsm_timeout_trans[fsm->cur_state])
       fsm->cur_state = fsm_timeout_trans[fsm->cur_state](fsm);
-    break;
-  case fsm_initiate :
-    if (fsm_initiate_trans[fsm->cur_state])
-      fsm->cur_state = fsm_initiate_trans[fsm->cur_state](fsm);
     break;
   default:
     mason_loge("invalid fsm input received");
@@ -1004,28 +1008,18 @@ static struct rnd_info *new_rnd_info(void)
   return  __setup_rnd_info(rnd);
 }
 
-static void reset_rnd_info(struct rnd_info *rnd)
-{
-  del_fsm_timer(&rnd->fsm);
-  if (rnd->tbl)
-    free_id_table(rnd->tbl);
-
-  rnd->tbl = (struct id_table *) kzalloc(sizeof(*rnd->tbl), GFP_ATOMIC);
-  rnd->rnd_id = 0;
-  rnd->my_id = 0;
-  rnd->pkt_id = 0;
-  rnd->txreq_id = 0;
-  rnd->txreq_cnt = 0;
-}
-
+/* Ensure that the contained fsm has been unlinked from fsm_list
+   before calling.  The del_fsm(), call_rcu() mechanism does this. */
 static void free_rnd_info(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
   
+  /* Ensure that no more references to fsm exist */
   del_fsm_timer(fsm);
+  flush_workqueue(dispatch_wq);
+  
   if (rnd->tbl)
     free_id_table(rnd->tbl);
-  
   if (rnd->dev)
     dev_put(rnd->dev);
   
@@ -1052,7 +1046,7 @@ static void fsm_init(struct fsm *fsm) {
     add_fsm(fsm);
     sema_init(&fsm->sem, 1);
     init_fsm_timer(&fsm->timer);
-    fsm->cur_state = fsm_idle;
+    fsm->cur_state = fsm_start;
   }
 };
 
@@ -1070,7 +1064,7 @@ static void del_fsm_all(void)
   destroy_workqueue(dispatch_wq);
   
   /* TODO: All init FSMs should send an abort */
-  
+
   /* Free all the fsms */
   rcu_read_lock();
   list_for_each_entry_rcu(fsm, &fsm_list, fsm_list) {
@@ -1198,10 +1192,56 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
 /* **************************************************************
  *                   Network functions
  * ************************************************************** */
-static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev) {
+static void mason_rcv_init(struct sk_buff *skb) {
+  struct rnd_info *rnd;
+  unsigned int i;
+  
+  for (i = 0; i < numids; ++i) {
+    rnd = new_rnd_info();
+    if (!rnd) {
+      mason_logd("Unable to create new client for received INIT");
+      break;
+    }
+    fsm_init_client(&rnd->fsm, skb_get(skb)); 
+  }
+}
+
+static void mason_rcv_all_fsm(struct sk_buff *skb) {
   struct fsm_input *input;
   struct fsm *fsm;
   __u32 rnd_id;
+
+  rcu_read_lock();
+  list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {
+    /* Optimization for TXREQ packets.  Only pass the packet to the
+     * FSM if the request ID matches that of this FSM
+     */
+    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != container_of(fsm, struct rnd_info, fsm)->my_id)
+      continue;
+    
+    /* Verify the round number of non-init packet*/
+    if ((rnd_id = container_of(fsm, struct rnd_info, fsm)->rnd_id) != mason_round_id(skb)) {
+      mason_logd("dropping packet with non-matching round id: got:%u expected:%u", mason_round_id(skb), rnd_id);
+      continue;
+    }
+    
+    /* Pass the packet to the FSM */
+    input = kmalloc(sizeof(*input), GFP_ATOMIC);
+    if (!input)
+      continue;
+    
+    input->type = fsm_packet;
+    input->data.skb = skb_get(skb);
+    
+    if (input->data.skb)
+      fsm_dispatch_interrupt(fsm, input);    
+    else
+      kfree(input);
+  }
+  rcu_read_unlock();
+}
+
+static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_type *pt, struct net_device *orig_dev) {
   int rc = 0;
   
   /* Drop packet if not addressed to us */
@@ -1212,48 +1252,23 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
   if (!pskb_may_pull(skb, sizeof(struct masonhdr)))
     goto free_skb;
 
+  /* Check for valid header */
   skb_reset_network_header(skb);  
   skb_pull(skb, sizeof(struct masonhdr));
   if (MASON_VERSION != mason_version(skb)) {
     mason_logi("dropping packet with invalid version. got:%u expected:%u", mason_version(skb), MASON_VERSION);
     goto free_skb;
   }
-
   mason_logd("received %s packet for round:%u", mason_type_str(skb), mason_round_id(skb));
 
-  /* Deliver the packet to each fsm */
-  rcu_read_lock();
-  list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {
-    /* Optimization for TXREQ packets.
-     * Only pass the packet to the FSM if the request ID matches that of this FSM
-     */
-    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != container_of(fsm, struct rnd_info, fsm)->my_id)
-      continue;
-    
-    /* Verify the round number of non-init packet*/
-    if (MASON_INIT != mason_type(skb)
-	&& (rnd_id = container_of(fsm, struct rnd_info, fsm)->rnd_id) != mason_round_id(skb)) {
-      mason_logd("dropping packet with non-matching round id: got:%u expected:%u", mason_round_id(skb), rnd_id);
-      continue;
-    }
-    
-    /* Pass the packet to the FSM */
-    input = kmalloc(sizeof(*input), GFP_ATOMIC);
-    if (!input)
-      continue;
-
-    input->type = fsm_packet;
-    if (list_is_singular(&fsm_list)) /* Don't clone if there's only one consumer */
-      input->data.skb = skb_get(skb);
-    else 
-      input->data.skb = skb_clone(skb, GFP_ATOMIC);
-    
-    if (input->data.skb)
-      fsm_dispatch_interrupt(fsm, input);    
-    else
-      kfree(input);
+  /* If INIT packet, create client fsm(s), passing the client packet to them */
+  if (mason_type(skb) == MASON_INIT) {
+    mason_rcv_init(skb);
+    goto free_skb;
   }
-  rcu_read_unlock();
+  
+  /* Otherwise, Deliver the packet to each fsm */
+  mason_rcv_all_fsm(skb);
   
  free_skb:
   kfree_skb(skb);
@@ -1272,8 +1287,7 @@ static struct packet_type mason_packet_type = {
 static int __init mason_init(void)
 {
   int rc;
-  struct fsm_input *input;
-  unsigned short int i;
+  struct rnd_info *rnd;
 
   mason_logi("Loading Mason Protocol module");
   mason_dev = dev_get_by_name(&init_net, iface); /* TODO: Find the
@@ -1299,33 +1313,22 @@ static int __init mason_init(void)
     goto fail_wq;
   }
   
-  /* Create the default fsm */
-  if (!new_rnd_info()) {
-    mason_loge("Failed to allocate memory for 'struct fsm'");
-    rc = -ENOMEM;
-    goto fail_fsm;
-  }
-  
-  for (i = 1; i < numids; ++i) {
-    new_rnd_info();
-  }
-
   dev_add_pack(&mason_packet_type);
-  
-  if (1 == init) {
-    msleep(1500);
-    input = kzalloc(sizeof(*input), GFP_ATOMIC);
-    if (!input)
-      goto out;
-    input->type = fsm_initiate;
-    fsm_dispatch_interrupt(FIRST_FSM, input);
+
+  if (1 == init 
+      && (rnd = new_rnd_info())) {
+    fsm_start_initiator(&rnd->fsm);
   }
   
- out:  
+  /*    input = kzalloc(sizeof(*input), GFP_ATOMIC);
+   *if (!input)
+   * goto out;
+   *input->type = fsm_initiate;
+   *fsm_dispatch_interrupt(FIRST_FSM, input);
+   */
+  
   return 0;
-
- fail_fsm:
-  destroy_workqueue(dispatch_wq);
+  
  fail_wq:
   dev_put(mason_dev);
  fail_dev:
@@ -1334,7 +1337,6 @@ static int __init mason_init(void)
 
 static void __exit mason_exit(void)
 {
-
   mason_logi("Unloading Mason Protocol module");
   dev_remove_pack(&mason_packet_type);
   del_fsm_all();
