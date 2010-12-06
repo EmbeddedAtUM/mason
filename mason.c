@@ -1342,16 +1342,27 @@ static void __exit mason_exit(void)
   struct fsm *fsm, *tmp;
 
   mason_logi("Unloading Mason Protocol module");
-  if (mason_dev)
-    dev_put(mason_dev);
 
+  /* Prevent new dispatches */
+  dev_remove_pack(&mason_packet_type);
+  list_for_each_entry(fsm, &fsm_list, fsm_list) {
+    del_fsm_timer(&fsm->rnd->timer);
+  }
+  
+  /* Ensures all pending dispatches are dispatched. */
+  destroy_workqueue(dispatch_wq);
+  
+  /* TODO: All init FSMs should send an abort */
+  
+  /* Free all the fsms */
   list_for_each_entry_safe(fsm, tmp, &fsm_list, fsm_list) {
     if (fsm->rnd)
       free_rnd_info(fsm->rnd);
     free_fsm(fsm);
   }
 
-  dev_remove_pack(&mason_packet_type);
+  if (mason_dev)
+    dev_put(mason_dev);
 }
 
 module_init(mason_init);
