@@ -18,23 +18,21 @@ clean:
 	$(MAKE) -C $(KERNEL_DIR) M=$(PWD) ARCH=$(ARCH) CROSS_COMPILE=$(CROSS_COMPILE) clean
 
 ins:
-	sudo /sbin/insmod mason.ko iface=eth0
+	sudo /sbin/insmod mason.ko
 ins100:
-	sudo /sbin/insmod mason.ko iface=eth0 numids=100
-insinit:
-	sudo /sbin/insmod mason.ko init=1 iface=eth0
+	sudo /sbin/insmod mason.ko numids=100
 rm:
 	sudo /sbin/rmmod mason
 push:
 	adb remount
 	adb push mason.ko system/lib/modules
+init:
+	echo -n eth0 > /proc/net/mason_initiate
 adbins:
 	adb shell 'insmod system/lib/modules/mason.ko'
 adbins100:
-	adb shell 'insmod system/lib/modules/mason.ko numids=100'
-adbinsinit:
-	adb shell 'insmod system/lib/modules/mason.ko init=1'
-adbrm:
+	adb shell 'insmod system/lib/modules/mason.ko numids=100'	
+adbrm:	
 	adb shell 'rmmod mason.ko'
 adbdmesg:
 	adb shell 'dmesg'

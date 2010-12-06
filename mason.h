@@ -131,7 +131,7 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm);
 static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm);
 static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm);
 
-static void fsm_start_initiator(struct fsm *fsm);
+static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev);
 static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb);
 
 static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb);

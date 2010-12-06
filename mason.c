@@ -16,6 +16,8 @@
 #include <linux/random.h>
 #include <linux/spinlock.h>
 #include <linux/rculist.h>
+#include <linux/proc_fs.h>
+#include <asm/uaccess.h>
 #include <net/net_namespace.h>
 
 #include "if_mason.h"
@@ -26,20 +28,14 @@ MODULE_LICENSE("GPL");
 MODULE_AUTHOR("Indu Reddy <inreddyp@umich.edu>");	
 MODULE_AUTHOR("David R. Bild <drbild@umich.edu>");
 
-
-static short int init = 0;
-module_param(init, short, S_IRUGO);
-MODULE_PARM_DESC(init, "1 if the module should initiate a round of mason test\n");
-
-static char *iface = "tiwlan0";
-module_param(iface, charp, S_IRUGO);
-MODULE_PARM_DESC(iface, "Interface on which to initiate Mason tests. Default is 'tiwlan0'.\n");
-
 static short int numids = 1;
 module_param(numids, short, S_IRUGO|S_IWUSR);
 MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 
-static struct net_device *mason_dev;
+#define PFS_INIT_NAME "mason_initiate"
+#define PFS_INIT_MAX_SIZE IFNAMSIZ
+static struct proc_dir_entry *pfs_init;
+
 static struct workqueue_struct *dispatch_wq;
 static LIST_HEAD(fsm_list);
 static DEFINE_SPINLOCK(fsm_list_lock);
@@ -451,7 +447,7 @@ static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm)
   return handle_next_rsstreq(rnd, 0);
 }
 
-static void fsm_start_initiator(struct fsm *fsm)
+static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
 {
   enum fsm_state ret;
   GET_RND_INFO(fsm, rnd);
@@ -463,8 +459,7 @@ static void fsm_start_initiator(struct fsm *fsm)
   rnd->pkt_id = 0;
   get_random_bytes(&rnd->rnd_id, sizeof(rnd->rnd_id));
   get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
-  dev_hold(mason_dev);
-  rnd->dev = mason_dev;
+  rnd->dev = dev;
   
   mason_logi("initiating round: %u", rnd->rnd_id);
   
@@ -675,10 +670,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short 
   struct masonhdr *hdr;
   struct net_device *dev;
 
-  if (rnd->dev)
-    dev = rnd->dev;
-  else
-    dev = mason_dev;
+  dev = rnd->dev;
   
   skb = alloc_skb(LL_ALLOCATED_SPACE(dev) + sizeof(*hdr) + len, GFP_ATOMIC);
   if (!skb) {
@@ -1284,6 +1276,59 @@ static struct packet_type mason_packet_type = {
   .func = mason_rcv,
 };
 
+/* **************************************************************
+ * Proc FS 
+ * ************************************************************** */
+static int write_pfs_init(struct file *file, const char *buffer,  unsigned long count, void *data) {
+  char iface[PFS_INIT_MAX_SIZE+1];
+  struct net_device *dev;
+  struct rnd_info *rnd;
+
+  memset(iface, 0, PFS_INIT_MAX_SIZE+1);
+  if (count > PFS_INIT_MAX_SIZE)
+    count = PFS_INIT_MAX_SIZE;
+  
+  if ( copy_from_user(iface, buffer, count) )
+    return -EFAULT;
+ 
+  dev = dev_get_by_name(&init_net, iface);
+  if (!dev) {
+    mason_logd("write_pfs_init: invalid dev name: '%s'", iface);
+    return -EINVAL;
+  }
+
+  rnd = new_rnd_info();
+  if (!rnd)
+    goto fail_rnd;
+  fsm_start_initiator(&rnd->fsm, dev);
+  return count;
+
+ fail_rnd:
+  dev_put(dev);
+  return -ENOMEM;
+}
+
+static int create_pfs_init(void)
+{
+  pfs_init = create_proc_entry(PFS_INIT_NAME, S_IFREG|S_IWUSR, init_net.proc_net);
+  if (!pfs_init) {
+    mason_loge("Unable to create %s proc file", PFS_INIT_NAME);
+    remove_proc_entry(PFS_INIT_NAME, init_net.proc_net);
+    return -ENOMEM;
+  }
+
+  pfs_init->write_proc = write_pfs_init;
+  pfs_init->uid = 0;
+  pfs_init->gid = 0;
+  pfs_init->size = 0;
+
+  return 0;
+}
+
+static inline void remove_pfs_init(void)
+{
+  remove_proc_entry(PFS_INIT_NAME, init_net.proc_net);
+}
 
 /* **************************************************************
  *                   Module functions
@@ -1291,51 +1336,26 @@ static struct packet_type mason_packet_type = {
 static int __init mason_init(void)
 {
   int rc;
-  struct rnd_info *rnd;
 
   mason_logi("Loading Mason Protocol module");
-  mason_dev = dev_get_by_name(&init_net, iface); /* TODO: Find the
-						    device by
-						    feature, rather
-						    than by name.
-						    Register for
-						    net_device
-						    notification
-						    chain to handle
-						    device addition
-						    and removal. */
-  if (!mason_dev) {
-    mason_loge("Failed to find default net_device");
-    rc = -EINVAL;
-    goto fail_dev;
-  }
 
   /* Create the input dispatch workqueue */
   if (NULL == (dispatch_wq = create_singlethread_workqueue("mason"))) {
-    mason_loge("Failed to create the dispatch workqueue");
+    mason_loge("failed to create the dispatch workqueue");
     rc = -ENOMEM;
     goto fail_wq;
   }
   
+  /* Create the procfs entries */
+  if (0 > (rc = create_pfs_init()))
+    goto fail_procfs;
+  
   dev_add_pack(&mason_packet_type);
-
-  if (1 == init 
-      && (rnd = new_rnd_info())) {
-    fsm_start_initiator(&rnd->fsm);
-  }
-  
-  /*    input = kzalloc(sizeof(*input), GFP_ATOMIC);
-   *if (!input)
-   * goto out;
-   *input->type = fsm_initiate;
-   *fsm_dispatch_interrupt(FIRST_FSM, input);
-   */
-  
   return 0;
   
+ fail_procfs:
+  destroy_workqueue(dispatch_wq);
  fail_wq:
-  dev_put(mason_dev);
- fail_dev:
   return rc;
 }
 
@@ -1345,8 +1365,8 @@ static void __exit mason_exit(void)
   dev_remove_pack(&mason_packet_type);
   del_fsm_all();
   
-  if (mason_dev)
-    dev_put(mason_dev);
+  /* Remove the procfs entries */
+  remove_pfs_init();
 }
 
 module_init(mason_init);
