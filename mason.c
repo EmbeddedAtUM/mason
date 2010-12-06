@@ -39,6 +39,7 @@ module_param(numids, short, S_IRUGO);
 MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 
 static struct net_device *mason_dev;
+static struct workqueue_struct *dispatch_wq;
 static LIST_HEAD(fsm_list);
 
 /* **************************************************************
@@ -604,7 +605,7 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
     dis->fsm = fsm;
     dis->input = input;
     INIT_WORK(&dis->work, fsm_dispatch_process);
-    schedule_work(&dis->work);
+    queue_work(dispatch_wq, &dis->work);
     goto out;
   }
 
@@ -1275,6 +1276,7 @@ static struct packet_type mason_packet_type = {
  * ************************************************************** */
 static int __init mason_init(void)
 {
+  int rc;
   struct fsm_input *input;
   unsigned short int i;
 
@@ -1291,14 +1293,22 @@ static int __init mason_init(void)
 						    and removal. */
   if (!mason_dev) {
     mason_loge("Failed to find default net_device");
-    return -EINVAL;
+    rc = -EINVAL;
+    goto fail_dev;
   }
 
+  /* Create the input dispatch workqueue */
+  if (NULL == (dispatch_wq = create_singlethread_workqueue("mason"))) {
+    mason_loge("Failed to create the dispatch workqueue");
+    rc = -ENOMEM;
+    goto fail_wq;
+  }
+  
   /* Create the default fsm */
   if (!new_fsm()) {
     mason_loge("Failed to allocate memory for 'struct fsm'");
-    dev_put(mason_dev);
-    return -ENOMEM;
+    rc = -ENOMEM;
+    goto fail_fsm;
   }
   
   for (i = 1; i < numids; ++i) {
@@ -1306,7 +1316,7 @@ static int __init mason_init(void)
   }
 
   dev_add_pack(&mason_packet_type);
-
+  
   if (1 == init) {
     msleep(1500);
     input = kzalloc(sizeof(*input), GFP_ATOMIC);
@@ -1316,8 +1326,15 @@ static int __init mason_init(void)
     fsm_dispatch_interrupt(FIRST_FSM, input);
   }
   
- out:
+ out:  
   return 0;
+
+ fail_fsm:
+  destroy_workqueue(dispatch_wq);
+ fail_wq:
+  dev_put(mason_dev);
+ fail_dev:
+  return rc;
 }
 
 static void __exit mason_exit(void)
