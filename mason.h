@@ -51,7 +51,7 @@ struct fsm {
   struct rcu_head  rcu;
   struct semaphore sem;
   enum fsm_state cur_state;
-  struct rnd_info *rnd;
+  void (*__free_child)(struct fsm *);
 };
 
 struct fsm_input {
@@ -67,9 +67,8 @@ struct fsm_dispatch {
   struct fsm_input *input;
 };
 
-static struct fsm *new_fsm(void);
 static void fsm_init(struct fsm *fsm);
-static void del_fsm(struct fsm *fsm);
+static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *));
 static void __del_fsm_callback(struct rcu_head *rp);
 static void __free_fsm(struct fsm *fsm);
 
@@ -85,13 +84,21 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
 static void fsm_dispatch_process(struct work_struct *work);
 static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input);
 
-static enum fsm_state fsm_idle_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_c_parlist_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_c_txreq_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_c_rsstreq_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_s_par_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_s_meas_packet(struct rnd_info *rnd, struct sk_buff *skb);
-static enum fsm_state fsm_s_rsst_packet(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state fsm_idle_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_c_txreq_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_s_par_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_s_meas_packet(struct fsm *fsm, struct sk_buff *skb);
+static enum fsm_state fsm_s_rsst_packet(struct fsm *fsm, struct sk_buff *skb);
+
+static enum fsm_state fsm_idle_timeout(struct fsm *fsm);
+static enum fsm_state fsm_client_timeout(struct fsm *fsm);
+static enum fsm_state fsm_s_par_timeout(struct fsm *fsm);
+static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm);
+static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm);
+
+static enum fsm_state fsm_idle_initiate(struct fsm *fsm);
 
 static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_txreq(struct rnd_info *rnd, struct sk_buff *skb);
@@ -105,14 +112,6 @@ static enum fsm_state handle_rsst(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_next_txreq(struct rnd_info *rnd);
 static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned char cont);
 static enum fsm_state fsm_s_abort(struct rnd_info *rnd);
-
-static enum fsm_state fsm_idle_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_client_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_s_par_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_s_meas_timeout(struct rnd_info *rnd, long data);
-static enum fsm_state fsm_s_rsst_timeout(struct rnd_info *rnd, long data);
-
-static enum fsm_state fsm_idle_initiate(struct rnd_info *rnd);
 
 /* **************************************************************
  * Timers
@@ -198,6 +197,7 @@ struct id_table {
 
 /* Information associated with a round */
 struct rnd_info {
+  struct fsm fsm;
   __u32 rnd_id;
   __u16 my_id;
   __u16 pkt_id;
@@ -207,10 +207,6 @@ struct rnd_info {
   struct net_device *dev;
   struct id_table *tbl;
   struct fsm_timer timer;
-  struct fsm *fsm; /* Ideally this back reference would not be
-		      necessary.  It can probably be removed if a
-		      global mapping between round ID and fsm is
-		      maintained. */
 };
 
 static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev)
@@ -221,9 +217,11 @@ static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev
   rnd->dev = dev;
 }
 
+#define GET_RND_INFO(fsmptr, rnd) struct rnd_info *rnd = container_of(fsmptr, struct rnd_info, fsm)
+
+static void reset_rnd_info(struct rnd_info *rnd);
 static struct rnd_info *new_rnd_info(void);
-static void free_rnd_info(struct rnd_info *ptr);
-static struct rnd_info *reset_rnd_info(struct rnd_info *ptr); 
+static void free_rnd_info(struct fsm *fsm);
 static void free_id_table(struct id_table *ptr);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_identity(struct masonid *ptr);
