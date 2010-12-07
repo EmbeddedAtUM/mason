@@ -7,14 +7,17 @@
  * Description: Mason netlink header definitions for kernel and userspace
  */
 
+#ifndef _NL_MASON_H
+#define _NL_MASON_H
+
 #include <linux/netlink.h>
 
 #define NETLINK_MASON 25
 
 #define MASON_NL_GRP 1
 
-#define MASON_NL_RECV 0
-#define MASON_NL_SEND 1
+#define MASON_NL_RECV 4
+#define MASON_NL_SEND 5
 
 struct mason_nl_recv {
   __be32 rnd_id;
@@ -32,9 +35,12 @@ struct mason_nl_send {
   __be16 pkt_id;
 };
 
+#define MASON_NL_SIZE (sizeof(struct mason_nl_recv) > sizeof(struct mason_nl_send) \
+		       ? sizeof(struct mason_nl_recv) : sizeof(struct mason_nl_send))
+  
 static inline void set_mason_nl_recv(struct mason_nl_recv *rec, __u32 rnd_id,
-					__u16 my_id, __u16 pos, __u16 pkt_id, 
-					__u16 sender_id, __s8 rssi)
+				     __u16 my_id, __u16 pos, __u16 pkt_id, 
+				     __u16 sender_id, __s8 rssi)
 {
   if (!rec)
     return;
@@ -45,3 +51,16 @@ static inline void set_mason_nl_recv(struct mason_nl_recv *rec, __u32 rnd_id,
   rec->sender_id = htons(sender_id);
   rec->rssi = rssi;
 }
+
+static inline void set_mason_nl_send(struct mason_nl_send *snd, __u32 rnd_id,
+				     __u16 my_id, __u16 pos, __u16 pkt_id)
+{
+  if (!snd)
+    return;
+  snd->rnd_id = htonl(rnd_id);
+  snd->my_id = htons(my_id);
+  snd->pos = htons(pos);
+  snd->pkt_id = htons(pkt_id);
+}
+
+#endif /* _NL_MASON_H */

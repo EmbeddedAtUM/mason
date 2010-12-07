@@ -148,10 +148,16 @@ static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 
 static enum fsm_state handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 {
+  struct sk_buff *skbr = NULL;
   if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))) {
     del_fsm_timer(&rnd->fsm);
-    if (mason_txreq_id(skb) == rnd->my_id)
-      bcast_mason_packet(create_mason_meas(rnd));
+    if (mason_txreq_id(skb) == rnd->my_id) {
+      skbr = create_mason_meas(rnd);
+      if (skbr) {
+	log_send_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skbr));
+	bcast_mason_packet(skbr);
+      } 
+    }
     mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   }
   return fsm_c_txreq;
@@ -311,7 +317,6 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
 {
   if (mason_sender_id(skb) != rnd->txreq_id) 
     return fsm_s_meas;
-  
   del_fsm_timer(&rnd->fsm);
   log_receive_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb));
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
@@ -1372,9 +1377,29 @@ static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_
   set_mason_nl_recv(rec, rnd_id, my_id, pos, pkt_id, sender_id, rssi);
   netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
   return;
-  //mason_logi("Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2)); 
 
- nlmsg_failure:
+ nlmsg_failure: /* Goto in NLMSG_PUT macro */
+  kfree_skb(skb);
+#endif
+}
+
+static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id)
+{
+#ifdef MASON_LOG_SEND
+  struct sk_buff *skb = NULL;
+  struct nlmsghdr *nlh;
+  struct mason_nl_send *snd;
+
+  if (NULL == (skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_send)), GFP_ATOMIC)))
+    return ;
+  
+  nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_SEND, sizeof(struct mason_nl_send));
+  snd = (struct mason_nl_send *)NLMSG_DATA(nlh);
+  set_mason_nl_send(snd, rnd_id, my_id, pos, pkt_id);
+  netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
+  return;
+
+ nlmsg_failure: /* Goto in NLMSG_PUT macro */
   kfree_skb(skb);
 #endif
 }

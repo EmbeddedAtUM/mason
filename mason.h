@@ -262,6 +262,7 @@ static void receive_netlink(struct sk_buff *skb);
 static void destroy_netlink(void);
 static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id, 
 				__u16 sender_id, __s8 rssi);
+static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id);
 
 #endif /* _MASON_H */
 
