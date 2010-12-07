@@ -183,16 +183,20 @@ void log_packets(void)
 		       ntohs(recvmsg->sender_id), recvmsg->rssi))) {
 	syslog(LOG_ERR, "failed to log recvmsg: %s\n", strerror(prc));
       } 
+      break;
     case MASON_NL_SEND:
-      if (nlh->nlmsg_len > sizeof(*sendmsg) ||
-	  len < NLMSG_SPACE(sizeof(*recvmsg)))
+      if (nlh->nlmsg_len < sizeof(*sendmsg) ||
+	  len < NLMSG_SPACE(sizeof(*sendmsg)))
 	continue;
       sendmsg = (struct mason_nl_send *)NLMSG_DATA(nlh);
       if (0 > (prc = 
-	       fprintf(logfd, "Send: rnd:%u my_id:%u time_or_position:%u packet_id:%u", ntohl(sendmsg->rnd_id), 
+	       fprintf(logfd, "Sent: rnd:%u my_id:%u time_or_position:%u packet_id:%u\n", ntohl(sendmsg->rnd_id), 
 		       ntohs(sendmsg->my_id), ntohs(sendmsg->pos), ntohs(sendmsg->pkt_id)))) {
 	syslog(LOG_ERR, "failed to log sendmsg: %s\n", strerror(prc));
       }
+      break;
+    default:
+      break;
     }
   }
   
