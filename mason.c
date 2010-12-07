@@ -160,6 +160,7 @@ static enum fsm_state handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb)
 {
   del_fsm_timer(&rnd->fsm);
+  log_receive_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb));
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
   mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   return fsm_c_txreq;
@@ -312,6 +313,7 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
     return fsm_s_meas;
   
   del_fsm_timer(&rnd->fsm);
+  log_receive_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb));
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
   return handle_next_txreq(rnd);
 }
@@ -1335,7 +1337,7 @@ static inline void remove_pfs_init(void)
  * ************************************************************** */
 static int init_netlink(void)
 {
-  nl_sk = netlink_kernel_create(&init_net, NETLINK_MASON, MASON_NL_LOG, receive_netlink, NULL, THIS_MODULE);
+  nl_sk = netlink_kernel_create(&init_net, NETLINK_MASON, MASON_NL_GRP, receive_netlink, NULL, THIS_MODULE);
   if (!nl_sk)
     return -EFAULT;
   else
@@ -1352,6 +1354,29 @@ static void destroy_netlink(void)
 {
   if (nl_sk)
     netlink_kernel_release(nl_sk);
+}
+
+static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id, 
+				__u16 sender_id, __s8 rssi)
+{
+#ifdef MASON_LOG_RECV
+  struct sk_buff *skb = NULL;
+  struct nlmsghdr *nlh;
+  struct mason_nl_recv *rec;
+
+  if (NULL == (skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_recv)), GFP_ATOMIC)))
+    return;
+  
+  nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_RECV, sizeof(struct mason_nl_recv));
+  rec = (struct mason_nl_recv *)NLMSG_DATA(nlh);
+  set_mason_nl_recv(rec, rnd_id, my_id, pos, pkt_id, sender_id, rssi);
+  netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
+  return;
+  //mason_logi("Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2)); 
+
+ nlmsg_failure:
+  kfree_skb(skb);
+#endif
 }
 
 /* **************************************************************
