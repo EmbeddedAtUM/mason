@@ -177,7 +177,7 @@ void log_packets(void)
 	  len < NLMSG_SPACE(sizeof(*recvmsg)))
 	continue;
       recvmsg = (struct mason_nl_recv *)NLMSG_DATA(nlh);
-      if (0 < (prc = 
+      if (0 > (prc = 
 	       fprintf(logfd, "Received: rnd:%u my_id:%u time_or_position:%u packet_id:%u sender_id:%u rssi:%d\n", 
 		       ntohl(recvmsg->rnd_id), ntohs(recvmsg->my_id), ntohs(recvmsg->pos), ntohs(recvmsg->pkt_id),
 		       ntohs(recvmsg->sender_id), recvmsg->rssi))) {
@@ -188,7 +188,7 @@ void log_packets(void)
 	  len < NLMSG_SPACE(sizeof(*recvmsg)))
 	continue;
       sendmsg = (struct mason_nl_send *)NLMSG_DATA(nlh);
-      if (0 < (prc = 
+      if (0 > (prc = 
 	       fprintf(logfd, "Send: rnd:%u my_id:%u time_or_position:%u packet_id:%u", ntohl(sendmsg->rnd_id), 
 		       ntohs(sendmsg->my_id), ntohs(sendmsg->pos), ntohs(sendmsg->pkt_id)))) {
 	syslog(LOG_ERR, "failed to log sendmsg: %s\n", strerror(prc));
