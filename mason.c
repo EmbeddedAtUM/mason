@@ -34,12 +34,12 @@ MODULE_PARM_DESC(numids, "Number of identities to present, Defaults is 1.\n");
 
 #define PFS_INIT_NAME "mason_initiate"
 #define PFS_INIT_MAX_SIZE IFNAMSIZ
-static struct proc_dir_entry *pfs_init;
-
-static struct workqueue_struct *dispatch_wq;
+static struct proc_dir_entry *pfs_init = NULL;
+static struct sock *nl_sk = NULL;
+static struct workqueue_struct *dispatch_wq = NULL;
 static LIST_HEAD(fsm_list);
 static DEFINE_SPINLOCK(fsm_list_lock);
-static unsigned long fsm_list_flags;
+static unsigned long fsm_list_flags = 0;
 
 /* **************************************************************
  * State Machine transition functions
@@ -1331,6 +1331,30 @@ static inline void remove_pfs_init(void)
 }
 
 /* **************************************************************
+ *                  Netlink functions
+ * ************************************************************** */
+static int init_netlink(void)
+{
+  nl_sk = netlink_kernel_create(&init_net, NETLINK_MASON, MASON_NL_LOG, receive_netlink, NULL, THIS_MODULE);
+  if (!nl_sk)
+    return -EFAULT;
+  else
+    return 0;
+}
+
+static void receive_netlink(struct sk_buff *skb)
+{
+  if (skb)
+    kfree_skb(skb);
+}
+
+static void destroy_netlink(void) 
+{
+  if (nl_sk)
+    netlink_kernel_release(nl_sk);
+}
+
+/* **************************************************************
  *                   Module functions
  * ************************************************************** */
 static int __init mason_init(void)
@@ -1339,20 +1363,23 @@ static int __init mason_init(void)
 
   mason_logi("Loading Mason Protocol module");
 
-  /* Create the input dispatch workqueue */
   if (NULL == (dispatch_wq = create_singlethread_workqueue("mason"))) {
     mason_loge("failed to create the dispatch workqueue");
     rc = -ENOMEM;
     goto fail_wq;
   }
   
-  /* Create the procfs entries */
   if (0 > (rc = create_pfs_init()))
     goto fail_procfs;
   
+  if (0 > init_netlink())
+    goto fail_nl;
+
   dev_add_pack(&mason_packet_type);
   return 0;
   
+ fail_nl:
+  remove_pfs_init();
  fail_procfs:
   destroy_workqueue(dispatch_wq);
  fail_wq:
@@ -1365,8 +1392,8 @@ static void __exit mason_exit(void)
   dev_remove_pack(&mason_packet_type);
   del_fsm_all();
   
-  /* Remove the procfs entries */
   remove_pfs_init();
+  destroy_netlink();
 }
 
 module_init(mason_init);

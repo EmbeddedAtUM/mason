@@ -15,6 +15,8 @@
 #include <linux/list.h>
 #include <linux/netdevice.h>
 
+#include "nl_mason.h"
+
 #define MIN_PARTICIPANTS 1
 #define MAX_PARTICIPANTS 400
 
@@ -251,6 +253,14 @@ static struct sk_buff *create_mason_rsst(struct rnd_info *rnd, struct create_rss
 static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb);
 static __u16 select_next_txreq_id(struct rnd_info *rnd);
+
+/* **************************************************************
+ *                    Netlink functions
+ * ************************************************************** */
+static int init_netlink(void);
+static void receive_netlink(struct sk_buff *skb);
+static void destroy_netlink(void);
+
 
 #endif /* _MASON_H */
 
