@@ -48,9 +48,8 @@ void signal_handler(int sig)
 {
   switch(sig) {
   case SIGHUP:
-    /* Nothing to do, just ignore If we ever add a configuration file,
-     * we can reload it on sighup
-     */
+    if (NULL != logfd)
+      fflush(logfd);
     break;
   case SIGINT:
     running = 0;
