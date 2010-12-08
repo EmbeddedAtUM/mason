@@ -266,7 +266,6 @@ int main(int argc, char *argv[])
   /* Main Loop in log_packets */
   log_packets();
   
- exit:
   rc = EXIT_SUCCESS;
   syslog(LOG_INFO, "daemon exiting\n");
  fail_bind:
