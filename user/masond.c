@@ -159,9 +159,8 @@ void log_packets(void)
   struct nlmsghdr *nlh = NULL;
   struct mason_nl_recv *recvmsg;
   struct mason_nl_send *sendmsg;
-  int len;
-  int prc;
-
+  struct mason_nl_addr *addrmsg;
+  int len, prc, i;
   nlh = (struct nlmsghdr *)malloc(nlhlen);
   
   while (running) {
@@ -195,6 +194,18 @@ void log_packets(void)
 	syslog(LOG_ERR, "failed to log sendmsg: %s\n", strerror(prc));
       }
       break;
+    case MASON_NL_ADDR:
+      if (nlh->nlmsg_len < sizeof(*addrmsg) ||
+	  len < NLMSG_SPACE(sizeof(*addrmsg)))
+	continue;
+      addrmsg = (struct mason_nl_addr *)NLMSG_DATA(nlh);
+      fprintf(logfd, "Addr: rnd:%u id:%u hwaddr:", ntohl(addrmsg->rnd_id), ntohs(addrmsg->id));
+      for(i = 0; i < (ntohs(addrmsg->addrlen) <= 12 ? ntohs(addrmsg->addrlen) : 12); ++i) {
+	if (0 != i)
+	  fprintf(logfd, ":");
+	fprintf(logfd, "%02X", (unsigned char)addrmsg->addr[i]);
+      }
+      fprintf(logfd, "\n");
     default:
       break;
     }
