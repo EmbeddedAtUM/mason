@@ -211,6 +211,12 @@ void log_packets(void)
     default:
       break;
     }
+
+    if (NULL != logfd) /* TODO: Fix SIGUP and remove this flush */
+      fflush(logfd);   /* SIGHUP doesn't seem to work on the Android
+			  phones.  Only the first SIGHUP is
+			  delivered. So, we flush after every line.*/
+    
   }
   
 }
