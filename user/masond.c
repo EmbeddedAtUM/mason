@@ -16,6 +16,7 @@
 #include <errno.h>
 #include <sys/socket.h>
 #include <linux/netlink.h>
+#include <netinet/in.h>
 
 #include "../nl_mason.h"
 
