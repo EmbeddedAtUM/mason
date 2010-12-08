@@ -303,12 +303,14 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
     mason_logd("participant limit exceeded");
     return fsm_s_abort(rnd);
   }
-  
+
+  del_fsm_timer(&rnd->fsm);
   if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
       || 0 > set_identity_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
     mason_logd("failed to add identity from PAR packet");
     return fsm_s_abort(rnd);
   }
+  mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
   log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
 
   return fsm_s_par;
