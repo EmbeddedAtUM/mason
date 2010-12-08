@@ -161,7 +161,8 @@ void log_packets(void)
   struct mason_nl_recv *recvmsg;
   struct mason_nl_send *sendmsg;
   struct mason_nl_addr *addrmsg;
-  int len, prc, i;
+  unsigned int len;
+  int prc, i;
   nlh = (struct nlmsghdr *)malloc(nlhlen);
   
   while (running) {
