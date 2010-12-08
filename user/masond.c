@@ -96,7 +96,7 @@ int parseopt(int argc, char *argv[])
 	usage(argc, argv, stderr);
 	return -EINVAL; 
       } else {
-	fprintf(stderr, "Unrecognized option -%c\n");
+	fprintf(stderr, "Unrecognized option -%c\n", optopt);
 	usage(argc, argv, stderr);
 	return -EINVAL;
       }
