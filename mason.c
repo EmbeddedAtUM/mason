@@ -309,7 +309,8 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
     mason_logd("failed to add identity from PAR packet");
     return fsm_s_abort(rnd);
   }
-  
+  log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
+
   return fsm_s_par;
 }
 
@@ -1400,6 +1401,41 @@ static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id)
   return;
 
  nlmsg_failure: /* Goto in NLMSG_PUT macro */
+  kfree_skb(skb);
+#endif
+}
+
+static void log_addr_netlink(__u32 rnd_id, __u16 id, struct sk_buff *skb_addr)
+{
+#ifdef MASON_LOG_ADDR
+  struct sk_buff *skb = NULL;
+  struct nlmsghdr *nlh;
+  struct mason_nl_addr *adr;
+  int addrlen;
+  char *addr;
+  
+  if (!skb_addr || (12 < (addrlen = skb_addr->dev->addr_len)))
+    return;
+  
+  if (NULL == (skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_addr)), GFP_ATOMIC)))
+    return;
+  
+  addr = kmalloc(skb_addr->dev->addr_len, GFP_ATOMIC);
+  if (!addr)
+    goto malloc_failure;
+  if  (0 > dev_parse_header(skb_addr, addr))
+    goto parse_failure;
+  
+  nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_ADDR, sizeof(struct mason_nl_addr));
+  adr = (struct mason_nl_addr *)NLMSG_DATA(nlh);
+  set_mason_nl_addr(adr, rnd_id, id, addrlen, addr);
+  netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
+  return;
+  
+ nlmsg_failure: /* Goto in NLMSG_PUT macro */
+ parse_failure:
+  kfree(addr);
+ malloc_failure:
   kfree_skb(skb);
 #endif
 }
