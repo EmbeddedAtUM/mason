@@ -58,6 +58,8 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       if (0 != mason_sender_id(skb)) 
 	goto err;
       
+      mason_logi("joining round: %u", rnd->rnd_id);
+
       /* Save info from packet */
       rnd_info_set_dev(rnd, skb->dev);
       rnd->rnd_id = mason_round_id(skb);
@@ -73,9 +75,8 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       /* Send PAR message */
       if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
 	goto err;
-      mod_fsm_timer(fsm, CLIENT_TIMEOUT);
+      mod_fsm_timer(fsm, CLIENT_PARLIST_TIMEOUT);
       ret = fsm_c_parlist;
-      mason_logi("joining round: %u", rnd->rnd_id);
       goto out;
     default:
       goto err;
