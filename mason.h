@@ -26,7 +26,7 @@
 #define MEAS_TIMEOUT 30
 #define RSST_TIMEOUT 100
 
-#define TXREQ_PER_ID_AVG 4
+#define TXREQ_PER_ID_AVG 14
 
 struct fsm_timer {
   struct timer_list tl;
