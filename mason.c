@@ -863,11 +863,13 @@ static struct sk_buff *create_mason_rsst(struct rnd_info *rnd, struct create_rss
   remain = max_len;
   for (; state->cur_id <= rnd->tbl->max_id; ++state->cur_id) {
     /* Check if there are packets to be reported for this ID */
+    if (!rnd->tbl->ids[state->cur_id])
+      continue;
     if (!state->cur_obs)
       state->cur_obs = rnd->tbl->ids[state->cur_id]->head;
     if (!state->cur_obs)
       continue;
-
+    
     /* Check for room to add at least one packet for new sender */
     if (7 > remain)
       goto frag;
