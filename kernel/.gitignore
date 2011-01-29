@@ -1,0 +1,10 @@
+*.ko.cmd
+*.mod.o.cmd
+*.o.cmd
+.tmp_versions
+Module.symvers
+mason.ko
+mason.mod.c
+mason.mod.o
+mason.o
+modules.order
