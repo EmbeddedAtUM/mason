@@ -1,7 +1,11 @@
-masond: masond.c
-	gcc -Wall -o masond masond.c
 
-masonloopd: masonloopd.c
-	gcc -Wall -o masonloopd masonloopd.c
+CFLAGS += -I../kernel/include/
+CFLAGS += -Wall
 
 all: masond masonloopd
+
+masond: masond.c
+	${CC} ${CFLAGS} -o masond masond.c
+
+masonloopd: masonloopd.c
+	${CC} ${CFLAGS} -o masonloopd masonloopd.c

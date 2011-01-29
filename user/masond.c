@@ -18,7 +18,7 @@
 #include <linux/netlink.h>
 #include <netinet/in.h>
 
-#include "../kernel/nl_mason.h"
+#include "nl_mason.h"
 
 #define DAEMON_NAME "masond"
 #define PID_FILE "/var/run/"DAEMON_NAME".pid"
