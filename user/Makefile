@@ -9,3 +9,7 @@ masond: masond.c
 
 masonloopd: masonloopd.c
 	${CC} ${CFLAGS} -o masonloopd masonloopd.c
+
+clean:
+	rm -rf masond
+	rm -rf masonloopd
