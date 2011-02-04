@@ -1,12 +1,5 @@
 obj-m += mason.o
 
-KERNEL_DIR ?= $(realpath ../../kernel/msm/)
-ifeq (,$(ARCH))
-  ARCH := arm
-  CROSS_COMPILE := arm-eabi-
-  PATH := $(PATH):../../prebuilt/linux-x86/toolchain/arm-eabi-4.4.0/bin/
-endif
-
 EXTRA_CFLAGS += -I${M}/include
 EXTRA_CFLAGS += -DMASON_DEBUG
 EXTRA_CFLAGS += -DMASON_LOG_SEND

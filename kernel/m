@@ -1,8 +1,10 @@
 #!/bin/bash
 
-export KERNEL_DIR=/lib/modules/`uname -r`/build
-export ARCH=x86_64
-export CROSS_COMPILE=
+export PATH=`pwd`/../../../prebuilt/linux-x86/toolchain/arm-eabi-4.4.0/bin/:$PATH
+
+export KERNEL_DIR=../../../kernel/msm/
+export ARCH=arm
+export CROSS_COMPILE=arm-eabi-
 
 if [ ! -n "${1+1}" ]; then
     NUMPROC=1
