@@ -1,4 +1,3 @@
-
 CFLAGS += -I../kernel/include/
 CFLAGS += -Wall
 

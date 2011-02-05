@@ -72,7 +72,8 @@ struct fsm_input {
   enum fsm_input_type type;
   union {
     long data;
-    struct sk_buff *skb;} data;
+    struct sk_buff *skb;
+  } data;
 };
 
 struct fsm_dispatch {
@@ -110,10 +111,11 @@ static void del_fsm_all(void);
 static void __del_fsm_callback(struct rcu_head *rp);
 static void __free_fsm(struct fsm *fsm);
 
-#define add_fsm(ptr) do {spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
-    list_add_rcu(&ptr->fsm_list, &fsm_list);				\
-    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);		\
-  } while(0)
+#define add_fsm(ptr) do { \
+  spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
+  list_add_rcu(&ptr->fsm_list, &fsm_list); \
+  spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);	\
+ } while(0)
 
 
 #define FIRST_FSM list_first_entry(&fsm_list, struct fsm, fsm_list)

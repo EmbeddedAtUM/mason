@@ -139,7 +139,8 @@ static __u16 select_next_txreq_id(struct rnd_info *rnd)
   return rnd->txreq_id;
 }
 
-static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
+static enum fsm_state
+handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
 {
   del_fsm_timer(&rnd->fsm);
   import_mason_parlist(rnd, skb);
@@ -147,7 +148,8 @@ static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   return fsm_c_parlist;
 }
 
-static enum fsm_state handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
+static enum fsm_state
+handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 {
   struct sk_buff *skbr = NULL;
   if (pskb_may_pull(skb, sizeof(struct txreq_masonpkt))) {
@@ -183,7 +185,9 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
   if (pskb_may_pull(skb, sizeof(struct rsstreq_masonpkt))) {
     del_fsm_timer(&rnd->fsm);
     if (mason_rsstreq_id(skb) == rnd->my_id) {
-      while(0 == bcast_mason_packet(create_mason_rsst(rnd, &state)));
+      while (! bcast_mason_packet(create_mason_rsst(rnd, &state))) {
+ /* Repeat. */
+      }
       return fsm_c_finish(rnd);
     } else {
       mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
@@ -360,7 +364,7 @@ static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned c
     return fsm_s_finish(rnd);
   }
 
-  if (0 != bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
+  if (bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
     return fsm_s_abort(rnd);
   mod_fsm_timer(&rnd->fsm, RSST_TIMEOUT);
   return fsm_s_rsst;
@@ -1375,7 +1379,8 @@ static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_
   struct nlmsghdr *nlh;
   struct mason_nl_recv *rec;
 
-  if (NULL == (skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_recv)), GFP_ATOMIC)))
+  skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_recv)), GFP_ATOMIC);
+  if (! skb)
     return;
   
   nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_RECV, sizeof(struct mason_nl_recv));
@@ -1489,6 +1494,3 @@ static void __exit mason_exit(void)
 
 module_init(mason_init);
 module_exit(mason_exit);
-
-
-
