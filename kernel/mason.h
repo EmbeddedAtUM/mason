@@ -143,7 +143,7 @@ static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_txreq(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb);
-static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd);
+static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd, const char *msg);
 static enum fsm_state fsm_c_finish(struct rnd_info *rnd);
 
 static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb);
@@ -151,7 +151,7 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_rsst(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_next_txreq(struct rnd_info *rnd);
 static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned char cont);
-static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd);
+static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd, const char *msg);
 static enum fsm_state fsm_s_finish(struct rnd_info *rnd);
 
 /* **************************************************************

@@ -199,9 +199,9 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
   } 
 }
 
-static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd)
+static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd, const char *msg)
 {
-  mason_logi("aborting");
+  mason_logi("client aborting: %s", msg);
   return fsm_c_finish(rnd);
 }
 
@@ -228,7 +228,7 @@ static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb)
     ret = handle_c_meas(rnd, skb);
     break;
   case MASON_ABORT:
-    ret = fsm_c_abort(rnd);
+    ret = fsm_c_abort(rnd, "received ABORT packet from initiator");
     break;
   default:
     ret = fsm_c_parlist;
@@ -256,7 +256,7 @@ static enum fsm_state fsm_c_txreq_packet(struct fsm *fsm, struct sk_buff *skb)
     ret = handle_rsstreq(rnd, skb);
     break;
   case MASON_ABORT:
-    ret = fsm_c_abort(rnd);
+    ret = fsm_c_abort(rnd, "received ABORT packet from initiator");
     break;
   default:
     ret = fsm_c_txreq;
@@ -285,9 +285,9 @@ static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb)
   return ret;
 }
 
-static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd)
+static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd, const char *msg)
 {
-  mason_logi("aborting");
+  mason_logi("initiator aborting: %s", msg);
   bcast_mason_packet(create_mason_abort(rnd));
   return fsm_s_finish(rnd);
 }
@@ -304,16 +304,13 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
   if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
     return fsm_s_par;
 
-  if (MAX_PARTICIPANTS - 1 == rnd->tbl->max_id) {
-    mason_logd("participant limit exceeded");
-    return fsm_s_abort(rnd);
-  }
-
+  if (MAX_PARTICIPANTS - 1 == rnd->tbl->max_id)
+    return fsm_s_abort(rnd, "participant limit exceeded");
+  
   del_fsm_timer(&rnd->fsm);
   if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
       || 0 > set_identity_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
-    mason_logd("failed to add identity from PAR packet");
-    return fsm_s_abort(rnd);
+    return fsm_s_abort(rnd, "unable to add identity from PAR packet");
   }
   mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
   log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
@@ -345,7 +342,7 @@ static enum fsm_state handle_next_txreq(struct rnd_info *rnd)
   /* Send next txreq if needed */
   if (rnd->txreq_cnt < rnd->tbl->max_id * TXREQ_PER_ID_AVG) {
     if (0 != bcast_mason_packet(create_mason_txreq(rnd, select_next_txreq_id(rnd))))
-      return fsm_s_abort(rnd);
+      return fsm_s_abort(rnd, "failed to send TXREQ packet");
     mod_fsm_timer(&rnd->fsm, MEAS_TIMEOUT);
     return fsm_s_meas;
   }
@@ -365,7 +362,7 @@ static enum fsm_state handle_next_rsstreq(struct rnd_info *rnd, const unsigned c
   }
 
   if (bcast_mason_packet(create_mason_rsstreq(rnd, rnd->txreq_id)))
-    return fsm_s_abort(rnd);
+    return fsm_s_abort(rnd, "failed to send RSSTREQ packet");
   mod_fsm_timer(&rnd->fsm, RSST_TIMEOUT);
   return fsm_s_rsst;
 }
@@ -426,7 +423,7 @@ static enum fsm_state fsm_s_rsst_packet(struct fsm *fsm, struct sk_buff *skb)
 static enum fsm_state fsm_client_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
-  return fsm_c_abort(rnd);
+  return fsm_c_abort(rnd, "client timeout expired");
 }
 
 static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
@@ -441,8 +438,7 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
     ret = handle_next_txreq(rnd);
   } else {
-    mason_logd("not enough participants");
-    ret = fsm_s_abort(rnd);
+    ret = fsm_s_abort(rnd, "not enough participants");
   }
   
   return ret;
@@ -480,8 +476,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   
   /* Send the INIT packet */
   if (0 != bcast_mason_packet(create_mason_init(rnd))) {
-    mason_logd();
-    ret = fsm_s_abort(rnd);
+    ret = fsm_s_abort(rnd, "failed to send INIT packet");
   } else {
     mason_logd("setting timer delay to PAR_TIMEOUT");
     mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
