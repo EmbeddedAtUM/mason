@@ -1232,8 +1232,16 @@ static void mason_rcv_all_fsm(struct sk_buff *skb) {
     /* Optimization for TXREQ packets.  Only pass the packet to the
      * FSM if the request ID matches that of this FSM
      */
-    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != rnd->my_id)
+    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != rnd->my_id) {
+      mod_fsm_timer(fsm, CLIENT_TIMEOUT); /* We don't acquire the FSM
+					     semaphore, so this timer
+					     update may be unsafe.
+					     This attacker
+					     optimization should be
+					     removed in a released
+					     version anyway. */
       continue;
+    }
 
     /* Pass the packet to the FSM */
     input = kmalloc(sizeof(*input), GFP_ATOMIC);
