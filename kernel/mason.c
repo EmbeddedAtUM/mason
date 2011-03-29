@@ -804,7 +804,7 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
     goto err;
   }
 
-  mason_logi_label(rnd, "RSST from observer id: %u", mason_sender_id(skb));
+  mason_logd_label(rnd, "RSST from observer id: %u", mason_sender_id(skb));
 
   remain = mason_rsst_len(skb);
   data = mason_data(skb);
@@ -820,7 +820,7 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
     if (pkt_cnt * 3 > remain)
       goto err;
     for (; pkt_cnt > 0; --pkt_cnt) {
-      mason_logi_label(rnd, "Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2));
+      mason_logd_label(rnd, "Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2));
       data += 3;
       remain -= 3;
     }
