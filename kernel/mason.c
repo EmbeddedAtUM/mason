@@ -57,15 +57,15 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       
       if (0 != mason_sender_id(skb)) 
 	goto err;
-      
-      mason_logi("joining round: %u", rnd->rnd_id);
+
+      mason_logi_label(rnd, "joining round");
 
       /* Save info from packet */
       rnd_info_set_dev(rnd, skb->dev);
       rnd->rnd_id = mason_round_id(skb);
       if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
 	  || 0 > set_identity_hwaddr(rnd->tbl->ids[0], skb)) {
-	mason_logd("failed to add identity of initiator");
+	mason_logd_label(rnd, "failed to add identity of initiator");
 	goto err;
       }
       
@@ -105,7 +105,7 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   __u8 *data;
 
   if (!pskb_may_pull(skb, sizeof(struct parlist_masonpkt))) {
-    mason_loge("PARLIST packet is too short");
+    mason_loge_label(rnd, "PARLIST packet is too short");
     return;
   }
   
@@ -114,11 +114,11 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   start_id = mason_parlist_id(skb);
 
   if (!pskb_may_pull(skb, count * RSA_LEN + sizeof(struct parlist_masonpkt))) {
-    mason_logi("PARLIST packet claims more data than available");
+    mason_logi_label(rnd, "PARLIST packet claims more data than available");
     return;
   }
   if (start_id + count - 1 > MAX_PARTICIPANTS) {
-    mason_logi("PARLIST packet claims invalid ids");
+    mason_logi_label(rnd, "PARLIST packet claims invalid ids");
     return;
   }
   
@@ -201,13 +201,13 @@ static enum fsm_state handle_rsstreq(struct rnd_info *rnd, struct sk_buff *skb)
 
 static inline enum fsm_state fsm_c_abort(struct rnd_info *rnd, const char *msg)
 {
-  mason_logi("client aborting: %s", msg);
+  mason_logi_label(rnd, "client aborting: %s", msg);
   return fsm_c_finish(rnd);
 }
 
 static enum fsm_state fsm_c_finish(struct rnd_info *rnd)
 {
-  mason_logi("finished round: %u", rnd->rnd_id);
+  mason_logi_label(rnd, "finished round: %u", rnd->rnd_id);
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
 }
@@ -287,14 +287,14 @@ static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb)
 
 static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd, const char *msg)
 {
-  mason_logi("initiator aborting: %s", msg);
+  mason_logi_label(rnd, "initiator aborting: %s", msg);
   bcast_mason_packet(create_mason_abort(rnd));
   return fsm_s_finish(rnd);
 }
 
 static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
 {
-  mason_logi("finished round: %u", rnd->rnd_id);
+  mason_logi_label(rnd, "finished round");
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
 }
@@ -432,9 +432,9 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
   enum fsm_state ret;
   __u16 cur_id = 1;
   
-  mason_logd("initiator timed out while waiting for PAR packet");
+  mason_logd_label(rnd, "initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
-    mason_logi("total participants: %u", rnd->tbl->max_id);
+    mason_logi_label(rnd, "total participants: %u", rnd->tbl->max_id);
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
     ret = handle_next_txreq(rnd);
   } else {
@@ -447,14 +447,14 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
 static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
-  mason_logd("initiator timed out while waiting for MEAS packet");
+  mason_logd_label(rnd, "initiator timed out while waiting for MEAS packet");
   return handle_next_txreq(rnd);  
 }  
 
 static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
-  mason_logd("initiator timed out while waiting for RSST packet");
+  mason_logd_label(rnd, "initiator timed out while waiting for RSST packet");
   return handle_next_rsstreq(rnd, 0);
 }
 
@@ -472,13 +472,13 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
   rnd->dev = dev;
   
-  mason_logi("initiating round: %u", rnd->rnd_id);
+  mason_logi_label(rnd, "initiating round");
   
   /* Send the INIT packet */
   if (0 != bcast_mason_packet(create_mason_init(rnd))) {
     ret = fsm_s_abort(rnd, "failed to send INIT packet");
   } else {
-    mason_logd("setting timer delay to PAR_TIMEOUT");
+    mason_logd_label(rnd, "setting timer delay to PAR_TIMEOUT");
     mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
     ret = fsm_s_par;
   }
@@ -486,7 +486,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   fsm->cur_state = ret;
   up(&fsm->sem);
   } else {
-    mason_logd("Unabled to send INIT message");
+    mason_logd_label(rnd, "Unabled to send INIT message");
     del_fsm(fsm, free_rnd_info);
     ret = fsm_term;
   }
@@ -684,7 +684,7 @@ static struct sk_buff *create_mason_packet(struct rnd_info *rnd, unsigned short 
   
   skb = alloc_skb(LL_ALLOCATED_SPACE(dev) + sizeof(*hdr) + len, GFP_ATOMIC);
   if (!skb) {
-    mason_loge("failed to allocate sk_buff");
+    mason_loge_label(rnd, "failed to allocate sk_buff");
     return NULL;
   }
 
@@ -804,7 +804,7 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
     goto err;
   }
 
-  mason_logi("RSST from observer id: %u", mason_sender_id(skb));
+  mason_logi_label(rnd, "RSST from observer id: %u", mason_sender_id(skb));
 
   remain = mason_rsst_len(skb);
   data = mason_data(skb);
@@ -820,7 +820,7 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
     if (pkt_cnt * 3 > remain)
       goto err;
     for (; pkt_cnt > 0; --pkt_cnt) {
-      mason_logi("Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2));
+      mason_logi_label(rnd, "Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2));
       data += 3;
       remain -= 3;
     }
@@ -829,7 +829,7 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
   return;
 
  err:
-  mason_loge("RSST packet is invalid");
+  mason_loge_label(rnd, "RSST packet is invalid");
 }
 
 /* Packet format is [frag:1][len:2]([sender_id:2][pkt_cnt:2]([pkt_id:2][rssi])+)+  */
@@ -976,7 +976,7 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr)
     mason_loge("failed to set device hard header on sk_buff");
     kfree_skb(skb);
   } else {
-    mason_logd( "sent %s packet", mason_type_str(skb));
+    mason_logd("sent %s packet", mason_type_str(skb));
     dev_queue_xmit(skb);
     rc = 0;
   }
@@ -1139,13 +1139,13 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 
   tbl = rnd->tbl;  
   if (tbl->ids[sender_id]) {
-    mason_loge("attempt to add identity that already exists.  Ignoring");
+    mason_loge_label(rnd, "attempt to add identity that already exists.  Ignoring");
     return -EINVAL;
   }
 
   id = kmalloc(sizeof(struct masonid), GFP_ATOMIC);
   if (!id) {
-    mason_loge("failed to allocate memory for 'struct masonid'");
+    mason_loge_label(rnd, "failed to allocate memory for 'struct masonid'");
     return -ENOMEM;
   }
   id->id = sender_id;
@@ -1160,10 +1160,10 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   /* If this is our identity, record the number assigned by the initiator */
   if (0 == memcmp(rnd->pub_key, id->pub_key, RSA_LEN)) {
     rnd->my_id = sender_id;
-    mason_logd("initiator assigned id:%u", sender_id);
+    mason_logd_label(rnd, "initiator assigned id:%u", sender_id);
   }  
-  mason_logd("added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
-	     rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
+  mason_logd_label(rnd, "added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
+		   rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
   return 0;
 }
 
@@ -1194,7 +1194,7 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   obs->next = prev_obs;
   msnid->head = obs;
   
-  mason_logd("recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
+  //mason_logd_label(rnd, "recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
 }
 
 /* **************************************************************
@@ -1217,22 +1217,24 @@ static void mason_rcv_init(struct sk_buff *skb) {
 static void mason_rcv_all_fsm(struct sk_buff *skb) {
   struct fsm_input *input;
   struct fsm *fsm;
-  __u32 rnd_id;
+  struct rnd_info *rnd;
 
   rcu_read_lock();
-  list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {
-    /* Optimization for TXREQ packets.  Only pass the packet to the
-     * FSM if the request ID matches that of this FSM
-     */
-    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != container_of(fsm, struct rnd_info, fsm)->my_id)
-      continue;
+  list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {    
+    rnd = container_of(fsm, struct rnd_info, fsm);
     
     /* Verify the round number of non-init packet*/
-    if ((rnd_id = container_of(fsm, struct rnd_info, fsm)->rnd_id) != mason_round_id(skb)) {
-      mason_logd("dropping packet with non-matching round id: got:%u expected:%u", mason_round_id(skb), rnd_id);
+    if (rnd->rnd_id  != mason_round_id(skb)) {
+      mason_logd_label(rnd, "dropping packet with non-matching round id: %u", mason_round_id(skb));
       continue;
     }
     
+    /* Optimization for TXREQ packets.  Only pass the packet to the
+     * FSM if the request ID matches that of this FSM
+     */
+    if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != rnd->my_id)
+      continue;
+
     /* Pass the packet to the FSM */
     input = kmalloc(sizeof(*input), GFP_ATOMIC);
     if (!input)
@@ -1267,7 +1269,7 @@ static int mason_rcv(struct sk_buff *skb, struct net_device *dev, struct packet_
     mason_logi("dropping packet with invalid version. got:%u expected:%u", mason_version(skb), MASON_VERSION);
     goto free_skb;
   }
-  mason_logd("received %s packet for round:%u", mason_type_str(skb), mason_round_id(skb));
+  mason_logd("<%u> received %s packet from id:%u", mason_round_id(skb), mason_type_str(skb), mason_sender_id(skb));
 
   /* If INIT packet, create client fsm(s), passing the client packet to them */
   if (mason_type(skb) == MASON_INIT) {

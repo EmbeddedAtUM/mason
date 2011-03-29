@@ -161,17 +161,21 @@ static enum fsm_state fsm_s_finish(struct rnd_info *rnd);
 #define MASON_KLOG_TERM "\n"
 
 #ifdef MASON_DEBUG
-#define mason_logd(str, ...) \
+#define mason_logd(str, ...)					\
   printk(KERN_DEBUG MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
 #else
 #define mason_logd(str, ...)
 #endif
 
-#define mason_logi(str, ...) \
+#define mason_logi(str, ...)					\
   printk(KERN_INFO MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
 
-#define mason_loge(str, ...) \
+#define mason_loge(str, ...)					\
   printk(KERN_ERR MASON_KLOG str MASON_KLOG_TERM, ##__VA_ARGS__)
+
+#define mason_logd_label(rnd, str, ...) mason_logd("<%u:%u> " str, rnd->rnd_id, rnd->my_id, ##__VA_ARGS__)
+#define mason_logi_label(rnd, str, ...) mason_logi("<%u:%u> " str, rnd->rnd_id, rnd->my_id, ##__VA_ARGS__)
+#define mason_loge_label(rnd, str, ...) mason_loge("<%u:%u> " str, rnd->rnd_id, rnd->my_id, ##__VA_ARGS__)
 
 /* **************************************************************
  * Round data
