@@ -63,7 +63,7 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       /* Save info from packet */
       rnd_info_set_dev(rnd, skb->dev);
       rnd->rnd_id = mason_round_id(skb);
-      if (0 > client_add_identity(rnd, 0, mason_init_pubkey(skb))
+      if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
 	  || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
 	mason_logd_label(rnd, "failed to add identity of initiator");
 	goto err;
@@ -125,7 +125,7 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   /* Add the participants to the identity table */
   data = mason_data(skb);
   for(i = start_id; i < count + start_id; ++i) {
-    client_add_identity(rnd, i, data);
+    add_identity(rnd, i, data);
     rnd_info_set_id_cond(rnd, i, data);
     data += RSA_LEN;
   }
@@ -1140,7 +1140,7 @@ static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
     tbl->max_id = mid->id;
 }
 
-static int client_add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key)
+static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key)
 {
   struct id_table *tbl;
   struct mason_id *mid;
@@ -1164,35 +1164,6 @@ static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u
     rnd->my_id = id;
     mason_logd_label(rnd, "setting initiator-assigned id:%u", id);
   }
-}
-
-static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
-{
-  struct id_table *tbl;
-  struct mason_id *id;
-
-  tbl = rnd->tbl;  
-  if (id_table_contains_id(tbl, sender_id)) {
-    mason_loge_label(rnd, "attempt to add identity that already exists.  Ignoring");
-    return -EINVAL;
-  }
-
-  id = kmalloc(sizeof(struct mason_id), GFP_ATOMIC);
-  if (!id) {
-    mason_loge_label(rnd, "failed to allocate memory for 'struct mason_id'");
-    return -ENOMEM;
-  }
-  mason_id_init(id, sender_id, pub_key);
-  id_table_add_mason_id(tbl, id);
-
-  /* If this is our identity, record the number assigned by the initiator */
-  if (0 == memcmp(rnd->pub_key, id->pub_key, RSA_LEN)) {
-    rnd->my_id = sender_id;
-    mason_logd_label(rnd, "initiator assigned id:%u", sender_id);
-  }  
-  mason_logd_label(rnd, "added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
-		   rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
-  return 0;
 }
 
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
