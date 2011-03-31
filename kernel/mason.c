@@ -63,7 +63,7 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       /* Save info from packet */
       rnd_info_set_dev(rnd, skb->dev);
       rnd->rnd_id = mason_round_id(skb);
-      if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
+      if (0 > client_add_identity(rnd, 0, mason_init_pubkey(skb))
 	  || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
 	mason_logd_label(rnd, "failed to add identity of initiator");
 	goto err;
@@ -125,7 +125,8 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   /* Add the participants to the identity table */
   data = mason_data(skb);
   for(i = start_id; i < count + start_id; ++i) {
-    add_identity(rnd, i, data);
+    client_add_identity(rnd, i, data);
+    rnd_info_set_id_cond(rnd, i, data);
     data += RSA_LEN;
   }
 }
@@ -1137,6 +1138,32 @@ static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
   tbl->ids[mid->id] = mid;
   if ( mid->id > tbl->max_id )
     tbl->max_id = mid->id;
+}
+
+static int client_add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key)
+{
+  struct id_table *tbl;
+  struct mason_id *mid;
+  tbl = rnd->tbl;
+
+  mid = kmalloc(sizeof(struct mason_id), GFP_ATOMIC);
+  if (!mid) {
+    mason_loge_label(rnd, "failed to allocate memory for 'struct mason_id'");
+    return -ENOMEM;
+  }
+  mason_id_init(mid, sender_id, pub_key);
+  id_table_add_mason_id(tbl, mid);
+
+  return 0;
+}
+
+/* Sets the id of the round if the given public key matches */
+static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[])
+{
+  if (0 == memcmp(rnd->pub_key, pub_key, RSA_LEN)) {
+    rnd->my_id = id;
+    mason_logd_label(rnd, "setting initiator-assigned id:%u", id);
+  }
 }
 
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
