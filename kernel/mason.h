@@ -194,21 +194,49 @@ struct rssi_obs {
 
 /* Identity Management */
 struct mason_id {
-  __u8  pub_key[RSA_LEN];
+  struct hlist_node hlist;
   __u16 id;  /* This id must be a assigned by the initiator to ensure
 		that it is unique */
+  __u8  pub_key[RSA_LEN];
   unsigned char *hwaddr;
   struct rssi_obs* head;
 };
 
+#define INIT_MASON_ID(ptr) (INIT_HLIST_HEAD(ptr))
+
+/* We assume that public keys are uniformly randomly distributed, so
+   the first byte is a perfect 8-bit hash. */
+static inline __u8 pub_key_hash(const __u8 pub_key[]) {
+  return pub_key[0];
+}
+
 struct id_table {
   struct mason_id *ids[MAX_PARTICIPANTS];
   __u16 max_id;
+  struct hlist_head ht[256];
 };
+
+#define INIT_ID_TABLE(ptr)						\
+  do {									\
+    int __i;								\
+    for (__i = 0; __i < 256; ++__i)					\
+      INIT_HLIST_HEAD(&(ptr)->ht[__i]);					\
+  } while(0)
 
 static inline bool id_table_contains_id(const struct id_table *tbl, const __u16 id)
 {
   return (NULL != tbl->ids[id]);
+}
+
+static inline bool id_table_contains_pub_key(const struct id_table *tbl, const __u8 pub_key[])
+{
+  struct mason_id *m;
+  struct hlist_node *pos;
+  hlist_for_each_entry(m, pos, &tbl->ht[pub_key_hash(pub_key)], hlist) {
+    if (0 == memcmp(pub_key, m->pub_key, RSA_LEN))
+      return true;
+  }
+  return false;
 }
 
 /* Information associated with a round */

@@ -309,10 +309,15 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
     return fsm_s_abort(rnd, "participant limit exceeded");
   
   del_fsm_timer(&rnd->fsm);
-  if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
-      || 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
-    return fsm_s_abort(rnd, "unable to add identity from PAR packet");
+
+  /* If the identity is new, add it to the round */
+  if ( !id_table_contains_pub_key(rnd->tbl, mason_par_pubkey(skb)) ) {
+    if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
+	|| 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
+      return fsm_s_abort(rnd, "unable to add identity from PAR packet");
+    }
   }
+
   mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
   log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
 
@@ -997,6 +1002,7 @@ static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
   ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_ATOMIC);
   if (!ptr->tbl) 
     goto fail_tbl;
+  INIT_ID_TABLE(ptr->tbl);
   ptr->rnd_id = 0;
   ptr->my_id = 0;
   ptr->pkt_id = 0;
@@ -1126,6 +1132,8 @@ static void free_rssi_obs_list(struct rssi_obs *head)
 
 static void free_mason_id(struct mason_id *ptr)
 {
+  hlist_del_init(&ptr->hlist);
+
   if (ptr->hwaddr)
     kfree(ptr->hwaddr);
   
@@ -1137,6 +1145,7 @@ static void free_mason_id(struct mason_id *ptr)
 
 static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
 {
+  hlist_add_head(&mid->hlist, &tbl->ht[pub_key_hash(mid->pub_key)]);
   tbl->ids[mid->id] = mid;
   if ( mid->id > tbl->max_id )
     tbl->max_id = mid->id;
