@@ -1155,11 +1155,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
     mason_loge_label(rnd, "failed to allocate memory for 'struct mason_id'");
     return -ENOMEM;
   }
-  id->id = sender_id;
-  memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
-  id->head = NULL;
-  id->hwaddr = NULL;
-
+  mason_id_init(id, sender_id, pub_key);
   id_table_add_mason_id(tbl, id);
 
   /* If this is our identity, record the number assigned by the initiator */
@@ -1170,6 +1166,14 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   mason_logd_label(rnd, "added identity: rnd:%u sender_id:%u pub_key:%x%x%x%x...", 
 		   rnd->rnd_id, id->id, id->pub_key[0], id->pub_key[1], id->pub_key[2], id->pub_key[3]);
   return 0;
+}
+
+static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
+{
+  mid->id = id;
+  memcpy(mid->pub_key, pub_key, sizeof(mid->pub_key));
+  mid->head = NULL;
+  mid->hwaddr = NULL;
 }
 
 static int mason_id_set_hwaddr(struct mason_id *id, const struct sk_buff *skb)
