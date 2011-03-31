@@ -1132,6 +1132,13 @@ static void free_mason_id(struct mason_id *ptr)
   kfree(ptr);
 }
 
+static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
+{
+  tbl->ids[mid->id] = mid;
+  if ( mid->id > tbl->max_id )
+    tbl->max_id = mid->id;
+}
+
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 {
   struct id_table *tbl;
@@ -1151,12 +1158,10 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   id->id = sender_id;
   memcpy(id->pub_key, pub_key, sizeof(id->pub_key));
   id->head = NULL;
-    id->hwaddr = NULL;
+  id->hwaddr = NULL;
 
-  tbl->ids[sender_id] = id;
-  if (rnd->tbl->max_id < sender_id)
-    rnd->tbl->max_id = sender_id;
-  
+  id_table_add_mason_id(tbl, id);
+
   /* If this is our identity, record the number assigned by the initiator */
   if (0 == memcmp(rnd->pub_key, id->pub_key, RSA_LEN)) {
     rnd->my_id = sender_id;

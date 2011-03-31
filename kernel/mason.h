@@ -237,6 +237,7 @@ static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev
 static struct rnd_info *new_rnd_info(void);
 static void free_rnd_info(struct fsm *fsm);
 static void free_id_table(struct id_table *ptr);
+static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_mason_id(struct mason_id *ptr);
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
