@@ -64,7 +64,7 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       rnd_info_set_dev(rnd, skb->dev);
       rnd->rnd_id = mason_round_id(skb);
       if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
-	  || 0 > set_identity_hwaddr(rnd->tbl->ids[0], skb)) {
+	  || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
 	mason_logd_label(rnd, "failed to add identity of initiator");
 	goto err;
       }
@@ -309,7 +309,7 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
   
   del_fsm_timer(&rnd->fsm);
   if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
-      || 0 > set_identity_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
+      || 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
     return fsm_s_abort(rnd, "unable to add identity from PAR packet");
   }
   mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
@@ -1043,7 +1043,7 @@ static void free_id_table(struct id_table *ptr)
 
   for (i = 0; i < MAX_PARTICIPANTS; ++i) {
     if (ptr->ids[i])
-      free_identity(ptr->ids[i]);
+      free_mason_id(ptr->ids[i]);
   }
 
   kfree(ptr);
@@ -1121,7 +1121,7 @@ static void free_rssi_obs_list(struct rssi_obs *head)
   } while (next);
 }
 
-static void free_identity(struct mason_id *ptr)
+static void free_mason_id(struct mason_id *ptr)
 {
   if (ptr->hwaddr)
     kfree(ptr->hwaddr);
@@ -1167,7 +1167,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   return 0;
 }
 
-static int set_identity_hwaddr(struct mason_id *id, const struct sk_buff *skb)
+static int mason_id_set_hwaddr(struct mason_id *id, const struct sk_buff *skb)
 {
   if (!id->hwaddr && !(id->hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC)))
     return -ENOMEM;  
