@@ -1138,7 +1138,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   struct mason_id *id;
 
   tbl = rnd->tbl;  
-  if (tbl->ids[sender_id]) {
+  if (id_table_contains_id(tbl, sender_id)) {
     mason_loge_label(rnd, "attempt to add identity that already exists.  Ignoring");
     return -EINVAL;
   }

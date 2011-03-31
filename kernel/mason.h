@@ -206,6 +206,11 @@ struct id_table {
   __u16 max_id;
 };
 
+static inline bool id_table_contains_id(const struct id_table *tbl, const __u16 id)
+{
+  return (NULL != tbl->ids[id]);
+}
+
 /* Information associated with a round */
 struct rnd_info {
   struct fsm fsm;
