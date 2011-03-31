@@ -181,19 +181,19 @@ static enum fsm_state fsm_s_finish(struct rnd_info *rnd);
  * Round data
  * ************************************************************** */
 /* Forward declaration */
-struct masonid;
+struct mason_id;
 struct rssi_obs;
 
 /* RSSI Observations */
 struct rssi_obs {
-  struct masonid *sender_id;
+  struct mason_id *sender_id;
   __u16 pkt_id;
   __s8  rssi;
   struct rssi_obs *next;
 };
 
 /* Identity Management */
-struct masonid {
+struct mason_id {
   __u8  pub_key[RSA_LEN];
   __u16 id;  /* This id must be a assigned by the initiator to ensure
 		that it is unique */
@@ -202,7 +202,7 @@ struct masonid {
 };
 
 struct id_table {
-  struct masonid *ids[MAX_PARTICIPANTS];
+  struct mason_id *ids[MAX_PARTICIPANTS];
   __u16 max_id;
 };
 
@@ -233,9 +233,9 @@ static struct rnd_info *new_rnd_info(void);
 static void free_rnd_info(struct fsm *fsm);
 static void free_id_table(struct id_table *ptr);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
-static void free_identity(struct masonid *ptr);
+static void free_identity(struct mason_id *ptr);
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key);
-static int set_identity_hwaddr(struct masonid *id, const struct sk_buff *skb);
+static int set_identity_hwaddr(struct mason_id *id, const struct sk_buff *skb);
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
 
 /* **************************************************************

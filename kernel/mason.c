@@ -1121,7 +1121,7 @@ static void free_rssi_obs_list(struct rssi_obs *head)
   } while (next);
 }
 
-static void free_identity(struct masonid *ptr)
+static void free_identity(struct mason_id *ptr)
 {
   if (ptr->hwaddr)
     kfree(ptr->hwaddr);
@@ -1135,7 +1135,7 @@ static void free_identity(struct masonid *ptr)
 static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
 {
   struct id_table *tbl;
-  struct masonid *id;
+  struct mason_id *id;
 
   tbl = rnd->tbl;  
   if (tbl->ids[sender_id]) {
@@ -1143,9 +1143,9 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
     return -EINVAL;
   }
 
-  id = kmalloc(sizeof(struct masonid), GFP_ATOMIC);
+  id = kmalloc(sizeof(struct mason_id), GFP_ATOMIC);
   if (!id) {
-    mason_loge_label(rnd, "failed to allocate memory for 'struct masonid'");
+    mason_loge_label(rnd, "failed to allocate memory for 'struct mason_id'");
     return -ENOMEM;
   }
   id->id = sender_id;
@@ -1167,7 +1167,7 @@ static int add_identity(struct rnd_info *rnd, __u16 sender_id, __u8 *pub_key)
   return 0;
 }
 
-static int set_identity_hwaddr(struct masonid *id, const struct sk_buff *skb)
+static int set_identity_hwaddr(struct mason_id *id, const struct sk_buff *skb)
 {
   if (!id->hwaddr && !(id->hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC)))
     return -ENOMEM;  
@@ -1176,7 +1176,7 @@ static int set_identity_hwaddr(struct masonid *id, const struct sk_buff *skb)
 
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi)
 {
-  struct masonid *msnid;
+  struct mason_id *msnid;
   struct rssi_obs *prev_obs, *obs;
 
   if (!tbl || (id > tbl->max_id) || !tbl->ids[id])
