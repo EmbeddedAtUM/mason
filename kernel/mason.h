@@ -22,9 +22,11 @@
 
 #define CLIENT_TIMEOUT 500
 #define PAR_TIMEOUT 500
-#define CLIENT_PARLIST_TIMEOUT ((MAX_PARTICIPANTS * 50) + PAR_TIMEOUT)
+#define CLIENT_PARACK_TIMEOUT 50
 #define MEAS_TIMEOUT 30
 #define RSST_TIMEOUT 100
+
+#define MAX_PAR_CNT 20
 
 #define TXREQ_PER_ID_AVG 14
 
@@ -44,13 +46,14 @@ struct fsm_timer {
 
 enum fsm_state {
   fsm_start     = 0,
-  fsm_c_parlist = 1,
-  fsm_c_txreq   = 2,
-  fsm_c_rsstreq = 3,
-  fsm_s_par     = 4,
-  fsm_s_meas    = 5,
-  fsm_s_rsst    = 6,
-  fsm_term      = 7,
+  fsm_c_parack  = 1,
+  fsm_c_parlist = 2,
+  fsm_c_txreq   = 3,
+  fsm_c_rsstreq = 4,
+  fsm_s_par     = 5,
+  fsm_s_meas    = 6,
+  fsm_s_rsst    = 7,
+  fsm_term      = 8,
 };
 
 enum fsm_input_type {
@@ -124,6 +127,7 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
 static void fsm_dispatch_process(struct work_struct *work);
 static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input);
 
+static enum fsm_state fsm_c_parack_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_txreq_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_rsstreq_packet(struct fsm *fsm, struct sk_buff *skb);
@@ -131,6 +135,7 @@ static enum fsm_state fsm_s_par_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_s_meas_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_s_rsst_packet(struct fsm *fsm, struct sk_buff *skb);
 
+static enum fsm_state fsm_c_parack_timeout(struct fsm *fsm);
 static enum fsm_state fsm_client_timeout(struct fsm *fsm);
 static enum fsm_state fsm_s_par_timeout(struct fsm *fsm);
 static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm);
@@ -139,6 +144,8 @@ static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm);
 static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev);
 static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb);
 
+static enum fsm_state handle_parack(struct rnd_info *rnd, struct sk_buff *skb);
+static enum fsm_state handle_parack_timeout(struct rnd_info *rnd);
 static enum fsm_state handle_parlist(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_txreq(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb);
@@ -250,6 +257,7 @@ struct rnd_info {
   __u16 txreq_cnt; 
   struct net_device *dev;
   struct id_table *tbl;
+  __u8 par_cnt;
 };
 
 static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev)

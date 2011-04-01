@@ -75,8 +75,8 @@ static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
       /* Send PAR message */
       if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
 	goto err;
-      mod_fsm_timer(fsm, CLIENT_PARLIST_TIMEOUT);
-      ret = fsm_c_parlist;
+      mod_fsm_timer(fsm, CLIENT_PARACK_TIMEOUT);
+      ret = fsm_c_parack;
       goto out;
     default:
       goto err;
@@ -138,6 +138,47 @@ static __u16 select_next_txreq_id(struct rnd_info *rnd)
   rnd->txreq_id = (rand_num % rnd->tbl->max_id) + 1;
   ++rnd->txreq_cnt;
   return rnd->txreq_id;
+}
+
+static enum fsm_state
+handle_parack(struct rnd_info *rnd, struct sk_buff *skb)
+{
+  enum fsm_state ret ;
+  if (!pskb_may_pull(skb, sizeof(struct parack_masonpkt))) {
+    goto out;
+    ret = fsm_c_parack;
+  }
+
+  if (0 == memcmp(mason_parack_pubkey(skb), rnd->pub_key, RSA_LEN)) {
+    /* Acknowledgement received */
+    del_fsm_timer(&rnd->fsm);
+    mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
+    ret = fsm_c_parlist;
+  } else {
+    /* Not our acknowledgement */
+    ret = fsm_c_parack;
+  }
+
+ out:
+  return ret;
+}
+
+static enum fsm_state
+handle_parack_timeout(struct rnd_info *rnd)
+{
+  enum fsm_state ret;
+  
+  ++rnd->par_cnt;
+  if (rnd->par_cnt < MAX_PAR_CNT) {
+    if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
+      mason_loge_label(rnd, "Failure to resend PAR packet. Will try again in %ums", CLIENT_PARACK_TIMEOUT);
+    mod_fsm_timer(&rnd->fsm, CLIENT_PARACK_TIMEOUT);
+    ret = fsm_c_parack;
+  } else {
+    ret = fsm_c_abort(rnd, "No acknowledgement from initiator. PAR packet retry limit exceeded");
+  }
+  
+  return ret;
 }
 
 static enum fsm_state
@@ -211,6 +252,27 @@ static enum fsm_state fsm_c_finish(struct rnd_info *rnd)
   mason_logi_label(rnd, "finished round: %u", rnd->rnd_id);
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
+}
+
+static enum fsm_state fsm_c_parack_packet(struct fsm *fsm, struct sk_buff *skb)
+{
+  GET_RND_INFO(fsm, rnd);
+  enum fsm_state ret;
+  
+  switch (mason_type(skb)) {
+  case MASON_PARACK:
+    ret = handle_parack(rnd, skb);
+    break;
+  case MASON_ABORT:
+    ret = fsm_c_abort(rnd, "received ABORT packet from initiator");
+    break;
+  default:
+    ret = fsm_c_abort(rnd, "initiator advanced round without acknowledging me");
+    break;
+  }
+  
+  kfree_skb(skb);
+  return ret;
 }
 
 static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb)
@@ -444,6 +506,12 @@ static enum fsm_state fsm_client_timeout(struct fsm *fsm)
   return fsm_c_abort(rnd, "client timeout expired");
 }
 
+static enum fsm_state fsm_c_parack_timeout(struct fsm *fsm)
+{
+  GET_RND_INFO(fsm, rnd);
+  return handle_parack_timeout(rnd);
+}
+
 static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
@@ -516,6 +584,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_packet_trans[])(struct fsm *fsm, struct sk_buff *) = {
   NULL,
+  &fsm_c_parack_packet,
   &fsm_c_parlist_packet,
   &fsm_c_txreq_packet,
   &fsm_c_rsstreq_packet,
@@ -528,6 +597,7 @@ static enum fsm_state (*fsm_packet_trans[])(struct fsm *fsm, struct sk_buff *) =
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_timeout_trans[])(struct fsm *fsm)  = {
   NULL,
+  &fsm_c_parack_timeout,
   &fsm_client_timeout,
   &fsm_client_timeout,
   &fsm_client_timeout,
