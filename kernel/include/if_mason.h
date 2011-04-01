@@ -28,16 +28,18 @@
 /* mason packet types */
 #define MASON_INIT    0x0
 #define MASON_PAR     0x1
-#define MASON_PARLIST 0x2
-#define MASON_TXREQ   0x3
-#define MASON_MEAS    0x4
-#define MASON_RSSTREQ 0x5
-#define MASON_RSST    0x6
-#define MASON_ABORT   0x7
+#define MASON_PARACK  0x2
+#define MASON_PARLIST 0x3
+#define MASON_TXREQ   0x4
+#define MASON_MEAS    0x5
+#define MASON_RSSTREQ 0x6
+#define MASON_RSST    0x7
+#define MASON_ABORT   0x8
 
 static const char* MASON_TYPES[] = {
   "INIT",
   "PAR",
+  "PARACK",
   "PARLIST",
   "TXREQ",
   "MEAS",
@@ -132,6 +134,16 @@ struct par_masonpkt {
 static inline __u8 *mason_par_pubkey(const struct sk_buff *skb)
 {
   return ((struct par_masonpkt *)(mason_typehdr(skb)))->pub_key;
+}
+
+/* participate acknowledgement packet */
+struct parack_masonpkt {
+  __u8 pub_key[RSA_LEN];
+} __attribute__((__packed__));
+
+static inline __u8 *mason_parack_pubkey(const struct sk_buff *skb)
+{
+  return ((struct parack_masonpkt *)(mason_typehdr(skb)))->pub_key;
 }
 
 /* participant list packet */

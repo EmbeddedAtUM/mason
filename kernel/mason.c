@@ -633,6 +633,7 @@ extern void *mason_data(const struct sk_buff *skb)
   switch (mason_type(skb)) {
   case MASON_INIT:    return ((void *)mason_typehdr(skb)) + sizeof(struct init_masonpkt);
   case MASON_PAR:     return ((void *)mason_typehdr(skb)) + sizeof(struct par_masonpkt);
+  case MASON_PARACK:  return ((void *)mason_typehdr(skb)) + sizeof(struct parack_masonpkt);
   case MASON_PARLIST: return ((void *)mason_typehdr(skb)) + sizeof(struct parlist_masonpkt);
   case MASON_TXREQ:   return ((void *)mason_typehdr(skb)) + sizeof(struct txreq_masonpkt);
   case MASON_MEAS:    return ((void *)mason_typehdr(skb)) + sizeof(struct meas_masonpkt);
@@ -667,6 +668,7 @@ extern struct masontail *mason_tail(const struct sk_buff *skb)
 	((struct rsst_masonpkt *)mason_typehdr(skb))->len;
     case MASON_INIT:
     case MASON_PAR:
+    case MASON_PARACK:
     case MASON_TXREQ:
     case MASON_MEAS:
     case MASON_RSSTREQ:
