@@ -283,6 +283,7 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr);
 static int bcast_mason_packet(struct sk_buff *skb);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
+static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u8 pub_key[]);
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, __u16 *start_id);
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);

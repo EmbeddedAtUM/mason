@@ -302,25 +302,37 @@ static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
 
 static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
 {
+  unsigned char *hwaddr;
+  
   if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
     return fsm_s_par;
-
+  
   if (MAX_PARTICIPANTS - 1 == rnd->tbl->max_id)
     return fsm_s_abort(rnd, "participant limit exceeded");
   
   del_fsm_timer(&rnd->fsm);
-
+  
   /* If the identity is new, add it to the round */
   if ( !id_table_contains_pub_key(rnd->tbl, mason_par_pubkey(skb)) ) {
     if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
 	|| 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
       return fsm_s_abort(rnd, "unable to add identity from PAR packet");
     }
+    log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
   }
-
+  
+  /* Send an acknowledgement, even if the identity is a duplicate */
+  hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
+  if (!hwaddr) {
+    mason_loge_label(rnd, "failed to allocate memory for hwaddr");
+    goto out;
+  }
+  dev_parse_header(skb, hwaddr);
+  if (0 != send_mason_packet(create_mason_parack(rnd, mason_par_pubkey(skb)), hwaddr))
+    mason_loge_label(rnd, "failed to send PARACK packet");
+  
+ out:
   mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
-  log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
-
   return fsm_s_par;
 }
 
@@ -731,6 +743,22 @@ static struct sk_buff *create_mason_par(struct rnd_info *rnd)
   skb_put(skb, sizeof(struct par_masonpkt));
   typehdr = (struct par_masonpkt *)mason_typehdr(skb);
   memcpy(typehdr->pub_key, rnd->pub_key, sizeof(typehdr->pub_key));
+  return skb;
+}
+
+static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u8 pub_key[])
+{
+  struct sk_buff *skb;
+  struct parack_masonpkt *typehdr;
+  
+  skb = create_mason_packet(rnd, MASON_PARACK, sizeof(struct parack_masonpkt));
+  if (!skb)
+    return NULL;
+
+  /* Set the type-specific data */
+  skb_put(skb, sizeof(struct parack_masonpkt));
+  typehdr = (struct parack_masonpkt *)mason_typehdr(skb);
+  memcpy(typehdr->pub_key, pub_key, sizeof(typehdr->pub_key));
   return skb;
 }
 
