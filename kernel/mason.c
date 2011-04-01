@@ -639,6 +639,7 @@ extern void *mason_data(const struct sk_buff *skb)
     return NULL;
   }
 }
+EXPORT_SYMBOL_GPL(mason_data);
 
 /*
  * Returns a pointer to the tail structure (aka signature) if the
@@ -672,6 +673,7 @@ extern struct masontail *mason_tail(const struct sk_buff *skb)
     }
   }
 }
+EXPORT_SYMBOL_GPL(mason_tail);
 
 /*
  * Create a Mason packet, with room past the header for 'len' bytes of data
