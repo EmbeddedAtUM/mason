@@ -128,6 +128,7 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input);
 static void fsm_dispatch_process(struct work_struct *work);
 static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input);
 
+static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_parack_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_parlist_packet(struct fsm *fsm, struct sk_buff *skb);
 static enum fsm_state fsm_c_txreq_packet(struct fsm *fsm, struct sk_buff *skb);
@@ -143,7 +144,6 @@ static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm);
 static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm);
 
 static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev);
-static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb);
 
 static enum fsm_state handle_parack(struct rnd_info *rnd, struct sk_buff *skb);
 static enum fsm_state handle_parack_timeout(struct rnd_info *rnd);

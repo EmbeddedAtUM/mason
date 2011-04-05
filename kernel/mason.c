@@ -44,58 +44,50 @@ static unsigned long fsm_list_flags = 0;
 /* **************************************************************
  * State Machine transition functions
  * ************************************************************** */
-static void fsm_init_client(struct fsm *fsm, struct sk_buff *skb)
+static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb)
 {
   GET_RND_INFO(fsm, rnd);
   enum fsm_state ret;
-  
-  if (0 == down_interruptible(&fsm->sem)) {
-    switch (mason_type(skb)) {
-    case MASON_INIT:
-      if (!pskb_may_pull(skb, sizeof(struct init_masonpkt))) 
-	goto err;
-      
-      if (0 != mason_sender_id(skb)) 
-	goto err;
 
-      mason_logi_label(rnd, "joining round");
+  switch (mason_type(skb)) {
+  case MASON_INIT:
+    if (!pskb_may_pull(skb, sizeof(struct init_masonpkt)))
+      goto err;
 
-      /* Save info from packet */
-      rnd_info_set_dev(rnd, skb->dev);
-      rnd->rnd_id = mason_round_id(skb);
-      if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
-	  || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
-	mason_logd_label(rnd, "failed to add identity of initiator");
-	goto err;
-      }
-      
-      /* Set the public key */
-      get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));      
-      
-      /* Send PAR message */
-      if (0 != send_mason_packet(create_mason_par(rnd), rnd->tbl->ids[0]->hwaddr))  
-	goto err;
-      mod_fsm_timer(fsm, CLIENT_PARACK_TIMEOUT);
-      ret = fsm_c_parack;
-      goto out;
-    default:
+    if (0 != mason_sender_id(skb))
+      goto err;
+
+    mason_logi_label(rnd, "joining round");
+
+    /* Save info from packet */
+    rnd_info_set_dev(rnd, skb->dev);
+    rnd->rnd_id = mason_round_id(skb);
+    if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
+	|| 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
+      mason_logd_label(rnd, "failed to add identity of initiator");
       goto err;
     }
-  } else {
-    del_fsm(fsm, free_rnd_info);
+
+    /* Set the public key */
+    get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
+
+    /* Send PAR message */
+    if (0 != send_mason_packet(create_mason_par(rnd),
+			       rnd->tbl->ids[0]->hwaddr))
+      goto err;
+    mod_fsm_timer(fsm, CLIENT_PARACK_TIMEOUT);
+    ret = fsm_c_parack;
     goto free_skb;
+  default:
+    goto err;
   }
   
  err:
-  del_fsm(fsm, free_rnd_info);
-  ret = fsm_term;  
-  
- out:
-  fsm->cur_state = ret;
-  up(&fsm->sem);
+  ret = fsm_c_abort(rnd, "Unable in to initialize client");
   
  free_skb:
   kfree_skb(skb);  
+  return ret;
 }
 
 
@@ -583,7 +575,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
  * ************************************************************** */
 /* Functions must be ordered same as fsm_state enum declaration */
 static enum fsm_state (*fsm_packet_trans[])(struct fsm *fsm, struct sk_buff *) = {
-  NULL,
+  &fsm_c_init_packet,
   &fsm_c_parack_packet,
   &fsm_c_parlist_packet,
   &fsm_c_txreq_packet,
@@ -1319,6 +1311,8 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
  *                   Network functions
  * ************************************************************** */
 static void mason_rcv_init(struct sk_buff *skb) {
+  struct fsm_dispatch *dis;
+  struct fsm_input *input;
   struct rnd_info *rnd;
   unsigned int i;
   
@@ -1328,7 +1322,24 @@ static void mason_rcv_init(struct sk_buff *skb) {
       mason_logd("Unable to create new client for received INIT");
       break;
     }
-    fsm_init_client(&rnd->fsm, skb_get(skb)); 
+
+    /* Pass the packet to the FSM */
+    input = kmalloc(sizeof(*input), GFP_ATOMIC);
+    if (unlikely(!input))
+      break;
+    input->type = fsm_packet;
+    input->data.skb = skb_get(skb);
+
+    dis = kmalloc(sizeof(*dis), GFP_ATOMIC);
+    if (unlikely(!dis)) {
+      kfree_skb(input->data.skb);
+      kfree(input);
+      break;
+    }
+    dis->fsm = &rnd->fsm;
+    dis->input = input;
+    INIT_WORK(&dis->work, fsm_dispatch_process);
+    queue_work(dispatch_wq, &dis->work);
   }
 }
 
