@@ -152,7 +152,7 @@ handle_parack(struct rnd_info *rnd, struct sk_buff *skb)
   if (0 == memcmp(mason_parack_pubkey(skb), rnd->pub_key, RSA_LEN)) {
     /* Acknowledgement received */
     del_fsm_timer(&rnd->fsm);
-    mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
+    mod_fsm_timer(&rnd->fsm, CLIENT_PARLIST_TIMEOUT);
     ret = fsm_c_parlist;
   } else {
     /* Not our acknowledgement */
