@@ -66,7 +66,7 @@ static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb)
     if (-EEXIST == (rc = add_identity(rnd, 0, mason_init_pubkey(skb))))
       goto cont;
     else if (0 > rc || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
-      mason_logd_label(rnd, "failed to add identity of initiator");
+      mason_loge_label(rnd, "failed to add identity of initiator");
       goto err;
     }
 
@@ -109,11 +109,11 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   start_id = mason_parlist_id(skb);
 
   if (!pskb_may_pull(skb, count * RSA_LEN + sizeof(struct parlist_masonpkt))) {
-    mason_logi_label(rnd, "PARLIST packet claims more data than available");
+    mason_loge_label(rnd, "PARLIST packet claims more data than available");
     return;
   }
   if (start_id + count - 1 > MAX_PARTICIPANTS) {
-    mason_logi_label(rnd, "PARLIST packet claims invalid ids");
+    mason_loge_label(rnd, "PARLIST packet claims invalid ids");
     return;
   }
   
@@ -528,14 +528,12 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
 static enum fsm_state fsm_s_meas_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
-  mason_logd_label(rnd, "initiator timed out while waiting for MEAS packet");
   return handle_next_txreq(rnd);  
 }  
 
 static enum fsm_state fsm_s_rsst_timeout(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
-  mason_logd_label(rnd, "initiator timed out while waiting for RSST packet");
   return handle_next_rsstreq(rnd, 0);
 }
 
@@ -559,7 +557,6 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   if (0 != bcast_mason_packet(create_mason_init(rnd))) {
     ret = fsm_s_abort(rnd, "failed to send INIT packet");
   } else {
-    mason_logd_label(rnd, "setting timer delay to PAR_TIMEOUT");
     mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
     ret = fsm_s_par;
   }
@@ -567,7 +564,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   fsm->cur_state = ret;
   up(&fsm->sem);
   } else {
-    mason_logd_label(rnd, "Unabled to send INIT message");
+    mason_loge_label(rnd, "Unabled to send INIT message");
     del_fsm(fsm, free_rnd_info);
     ret = fsm_term;
   }
@@ -930,7 +927,6 @@ static void import_mason_rsst(struct rnd_info *rnd, struct sk_buff *skb)
     if (pkt_cnt * 3 > remain)
       goto err;
     for (; pkt_cnt > 0; --pkt_cnt) {
-      mason_logd_label(rnd, "Received: time_or_position:unknown packet_id:%u sender_id:%u rssi:%d", ntohs(*(__u16 *)data), sender_id, *(__s8*)(data+2));
       data += 3;
       remain -= 3;
     }
@@ -1283,10 +1279,8 @@ static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 
 /* Sets the id of the round if the given public key matches */
 static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[])
 {
-  if (0 == memcmp(rnd->pub_key, pub_key, RSA_LEN)) {
+  if (0 == memcmp(rnd->pub_key, pub_key, RSA_LEN))
     rnd->my_id = id;
-    mason_logd_label(rnd, "setting initiator-assigned id:%u", id);
-  }
 }
 
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
@@ -1327,8 +1321,6 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   obs->rssi = rssi;
   obs->next = prev_obs;
   msnid->head = obs;
-  
-  //mason_logd_label(rnd, "recorded new RSSI. sender_id:%u pkt_id:%u rssi:%d", id, pkt_id, rssi);
 }
 
 /* **************************************************************
@@ -1347,7 +1339,7 @@ static void mason_rcv_init(struct sk_buff *skb) {
     else
       rnd = new_rnd_info();
     if (!rnd) {
-      mason_logd("Unable to create new client for received INIT");
+      mason_loge("Unable to create new client for received INIT");
       break;
     }
 
@@ -1481,7 +1473,7 @@ static int write_pfs_init(struct file *file, const char *buffer,  unsigned long 
  
   dev = dev_get_by_name(&init_net, iface);
   if (!dev) {
-    mason_logd("write_pfs_init: invalid dev name: '%s'", iface);
+    mason_logi("write_pfs_init: invalid dev name: '%s'", iface);
     return -EINVAL;
   }
 
