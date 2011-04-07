@@ -1337,12 +1337,15 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
 static void mason_rcv_init(struct sk_buff *skb) {
   struct fsm_dispatch *dis;
   struct fsm_input *input;
-  struct rnd_info *rnd;
+  struct rnd_info *rnd = NULL;
   unsigned int i;
   const unsigned int INTERVAL_MS = 70;
   
   for (i = 0; i < numids; ++i) {
-    rnd = new_rnd_info();
+    if (rnd)
+      rnd = new_rnd_info_shared(rnd->tbl);
+    else
+      rnd = new_rnd_info();
     if (!rnd) {
       mason_logd("Unable to create new client for received INIT");
       break;
