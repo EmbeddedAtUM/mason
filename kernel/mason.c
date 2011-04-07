@@ -621,7 +621,7 @@ static void __fsm_dispatch(struct fsm *fsm, struct fsm_input *input)
 
 static void fsm_dispatch_process(struct work_struct *work)
 {
-  struct fsm_dispatch *dis = container_of(work, struct fsm_dispatch, work);
+  struct fsm_dispatch *dis = container_of((struct delayed_work *)work, struct fsm_dispatch, work);
   struct fsm *fsm = dis->fsm;
 
   if (!fsm)
@@ -661,8 +661,8 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
     dis->fsm = fsm;
     dis->input = input;
     kref_get(&fsm->kref);
-    INIT_WORK(&dis->work, fsm_dispatch_process);
-    queue_work(dispatch_wq, &dis->work);
+    INIT_DELAYED_WORK(&dis->work, fsm_dispatch_process);
+    queue_delayed_work(dispatch_wq, &dis->work, 0);
     goto out;
   }
 
@@ -1340,8 +1340,8 @@ static void mason_rcv_init(struct sk_buff *skb) {
     dis->fsm = &rnd->fsm;
     dis->input = input;
     kref_get(&rnd->fsm.kref);
-    INIT_WORK(&dis->work, fsm_dispatch_process);
-    queue_work(dispatch_wq, &dis->work);
+    INIT_DELAYED_WORK(&dis->work, fsm_dispatch_process);
+    queue_delayed_work(dispatch_wq, &dis->work, 0);
   }
 }
 

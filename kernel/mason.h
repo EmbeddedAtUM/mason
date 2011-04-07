@@ -83,7 +83,7 @@ struct fsm_input {
 };
 
 struct fsm_dispatch {
-  struct work_struct work;
+  struct delayed_work work;
   struct fsm *fsm;
   struct fsm_input *input;
 };
