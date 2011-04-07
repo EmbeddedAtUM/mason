@@ -1373,7 +1373,13 @@ static void mason_rcv_all_fsm(struct sk_buff *skb) {
       continue;
     }
     
-    /* Optimization for TXREQ packets.  Only pass the packet to the
+    /* Attacker Optimization for PARACK packets.  Do not pass the packet to the
+     * FSM if the first 4 bytes of the public keys do not match.
+     */
+    if (mason_type(skb) == MASON_PARACK && (0 != memcmp(mason_parack_pubkey(skb), rnd->pub_key, 4)) )
+      continue; /* Do not need to reset timer here */
+
+    /* Attacker Optimization for TXREQ packets.  Only pass the packet to the
      * FSM if the request ID matches that of this FSM
      */
     if (mason_type(skb) == MASON_TXREQ && mason_txreq_id(skb) != rnd->my_id) {
