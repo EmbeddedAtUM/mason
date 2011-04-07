@@ -233,12 +233,14 @@ static inline __u8 pub_key_hash(const __u8 pub_key[]) {
 struct id_table {
   struct mason_id *ids[MAX_PARTICIPANTS];
   __u16 max_id;
+  struct kref kref;
   struct hlist_head ht[256];
 };
 
 #define INIT_ID_TABLE(ptr)						\
   do {									\
     int __i;								\
+    kref_init(&ptr->kref);						\
     for (__i = 0; __i < 256; ++__i)					\
       INIT_HLIST_HEAD(&(ptr)->ht[__i]);					\
   } while(0)
@@ -286,6 +288,7 @@ static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev
 static struct rnd_info *new_rnd_info(void);
 static void free_rnd_info(struct fsm *fsm);
 static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[]);
+static void __release_id_table(struct kref *kref);
 static void free_id_table(struct id_table *ptr);
 static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid);
 static void free_rssi_obs_list(struct rssi_obs *ptr);

@@ -1134,11 +1134,16 @@ static void free_rnd_info(struct fsm *fsm)
   GET_RND_INFO(fsm, rnd);
   
   if (rnd->tbl)
-    free_id_table(rnd->tbl);
+    kref_put(&(rnd->tbl)->kref, __release_id_table);
   if (rnd->dev)
     dev_put(rnd->dev);
   
   kfree(rnd);
+}
+
+static void __release_id_table(struct kref *kref)
+{
+  free_id_table(container_of(kref, struct id_table, kref));
 }
 
 static void free_id_table(struct id_table *ptr)
