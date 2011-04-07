@@ -1316,6 +1316,7 @@ static void mason_rcv_init(struct sk_buff *skb) {
   struct fsm_input *input;
   struct rnd_info *rnd;
   unsigned int i;
+  const unsigned int INTERVAL_MS = 70;
   
   for (i = 0; i < numids; ++i) {
     rnd = new_rnd_info();
@@ -1341,7 +1342,7 @@ static void mason_rcv_init(struct sk_buff *skb) {
     dis->input = input;
     kref_get(&rnd->fsm.kref);
     INIT_DELAYED_WORK(&dis->work, fsm_dispatch_process);
-    queue_delayed_work(dispatch_wq, &dis->work, 0);
+    queue_delayed_work(dispatch_wq, &dis->work, msecs_to_jiffies(INTERVAL_MS * i));
   }
 }
 
