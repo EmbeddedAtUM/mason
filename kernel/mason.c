@@ -1368,10 +1368,8 @@ static void mason_rcv_all_fsm(struct sk_buff *skb) {
       continue;
 
     /* Verify the round number of non-init packet*/
-    if (rnd->rnd_id  != mason_round_id(skb)) {
-      mason_logd_label(rnd, "dropping packet with non-matching round id: %u", mason_round_id(skb));
+    if (rnd->rnd_id  != mason_round_id(skb))
       continue;
-    }
     
     /* Attacker Optimization for PARACK packets.  Do not pass the packet to the
      * FSM if the first 4 bytes of the public keys do not match.
