@@ -1096,35 +1096,41 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr)
 /* **************************************************************
  *                  Round Info utility functions
  * ************************************************************** */
-static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr)
+static struct rnd_info *__setup_rnd_info(struct rnd_info *ptr, struct id_table *tbl)
 {
-  if (!ptr)
-    return NULL;
-
-  ptr->tbl = (struct id_table *) kzalloc(sizeof(*ptr->tbl), GFP_ATOMIC);
-  if (!ptr->tbl) 
-    goto fail_tbl;
-  INIT_ID_TABLE(ptr->tbl);
-  ptr->rnd_id = 0;
-  ptr->my_id = 0;
-  ptr->pkt_id = 0;
-  ptr->txreq_id = 0;
-  ptr->txreq_cnt = 0;
-  fsm_init(&ptr->fsm);
+  if (ptr) {
+    kref_get(&tbl->kref);
+    ptr->tbl = tbl;
+    ptr->rnd_id = 0;
+    ptr->my_id = 0;
+    ptr->pkt_id = 0;
+    ptr->txreq_id = 0;
+    ptr->txreq_cnt = 0;
+    fsm_init(&ptr->fsm);
+  }
   return ptr;
-  
- fail_tbl:
-  kfree(ptr);
-  return NULL;
 }
 
-static struct rnd_info *new_rnd_info(void)
+static struct rnd_info *new_rnd_info_shared(struct id_table *tbl)
 {
   struct rnd_info *rnd;
   rnd = (struct rnd_info *) kzalloc(sizeof(struct rnd_info), GFP_ATOMIC);
   if (!rnd)
     return NULL;
-  return  __setup_rnd_info(rnd);
+  return  __setup_rnd_info(rnd, tbl);
+}
+
+static struct rnd_info *new_rnd_info(void)
+{
+  struct rnd_info *rnd;
+  struct id_table *tbl;
+  tbl = (struct id_table *) kzalloc(sizeof(*tbl), GFP_ATOMIC);
+  if (!tbl)
+    return NULL;
+  INIT_ID_TABLE(tbl);
+  rnd = new_rnd_info_shared(tbl);
+  kref_put(&tbl->kref, __release_id_table); /* put for the get in INIT_ID_TABLE */
+  return rnd;
 }
 
 /* Ensure that the contained fsm has been unlinked from fsm_list

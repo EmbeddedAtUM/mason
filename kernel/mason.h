@@ -286,6 +286,7 @@ static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev
 #define GET_RND_INFO(fsmptr, rnd) struct rnd_info *rnd = container_of(fsmptr, struct rnd_info, fsm)
 
 static struct rnd_info *new_rnd_info(void);
+static struct rnd_info *new_rnd_info_shared(struct id_table *tbl);
 static void free_rnd_info(struct fsm *fsm);
 static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[]);
 static void __release_id_table(struct kref *kref);
