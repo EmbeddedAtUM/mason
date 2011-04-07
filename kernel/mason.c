@@ -632,6 +632,8 @@ static void fsm_dispatch_process(struct work_struct *work)
     up(&fsm->sem);
   }
   
+  kref_put(&fsm->kref, __release_fsm);
+
  out:
   kfree(dis->input);
   kfree(dis);
@@ -658,6 +660,7 @@ static int fsm_dispatch_interrupt(struct fsm *fsm, struct fsm_input *input)
     
     dis->fsm = fsm;
     dis->input = input;
+    kref_get(&fsm->kref);
     INIT_WORK(&dis->work, fsm_dispatch_process);
     queue_work(dispatch_wq, &dis->work);
     goto out;
@@ -677,8 +680,12 @@ static void fsm_timer_callback(unsigned long data)
 {
   struct fsm_timer *timer = (struct fsm_timer *) data;
   struct fsm_input *input;
+  struct fsm *fsm;
 
   timer->expired_idx = timer->idx;
+  fsm = container_of(timer, struct fsm, timer);
+  if (!fsm->run)
+    return;
 
   input = kzalloc(sizeof(*input), GFP_ATOMIC);
   if (!input)
@@ -1123,10 +1130,6 @@ static void free_rnd_info(struct fsm *fsm)
 {
   GET_RND_INFO(fsm, rnd);
   
-  /* Ensure that no more references to fsm exist */
-  del_fsm_timer(fsm);
-  flush_workqueue(dispatch_wq);
-  
   if (rnd->tbl)
     free_id_table(rnd->tbl);
   if (rnd->dev)
@@ -1184,6 +1187,7 @@ static void del_fsm_all(void)
 
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *)) 
 {
+  fsm->run = 0;
   spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);
   list_del_rcu(&fsm->fsm_list);
   spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);
@@ -1193,18 +1197,15 @@ static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *))
 
 static void __del_fsm_callback(struct rcu_head *rp)
 {
-  __free_fsm(container_of(rp, struct fsm, rcu));
+  kref_put(&container_of(rp, struct fsm, rcu)->kref, __release_fsm);
 }
 
-/*
- * This should be called in or after the update phase of the fsm_list
- * rcu delete.  To ensure all references are gone, we must cancel the
- * timer and empty the dispatch queue.
- */
-static void __free_fsm(struct fsm *fsm)
-{
+static void __release_fsm(struct kref *kref) {
+  __free_fsm(container_of(kref, struct fsm, kref));
+}
+
+static void __free_fsm(struct fsm *fsm) {
   del_fsm_timer(fsm);
-  flush_workqueue(dispatch_wq);
   fsm->__free_child(fsm);
 }
 
@@ -1338,6 +1339,7 @@ static void mason_rcv_init(struct sk_buff *skb) {
     }
     dis->fsm = &rnd->fsm;
     dis->input = input;
+    kref_get(&rnd->fsm.kref);
     INIT_WORK(&dis->work, fsm_dispatch_process);
     queue_work(dispatch_wq, &dis->work);
   }
@@ -1351,7 +1353,11 @@ static void mason_rcv_all_fsm(struct sk_buff *skb) {
   rcu_read_lock();
   list_for_each_entry_rcu( fsm, &fsm_list, fsm_list) {    
     rnd = container_of(fsm, struct rnd_info, fsm);
-    
+
+    /* Skip if FSM is stopped */
+    if (!fsm->run)
+      continue;
+
     /* Verify the round number of non-init packet*/
     if (rnd->rnd_id  != mason_round_id(skb)) {
       mason_logd_label(rnd, "dropping packet with non-matching round id: %u", mason_round_id(skb));

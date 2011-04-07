@@ -69,6 +69,8 @@ struct fsm {
   struct semaphore sem;
   enum fsm_state cur_state;
   struct fsm_timer timer;
+  struct kref kref;
+  unsigned char run;
   void (*__free_child)(struct fsm *);
 };
 
@@ -94,7 +96,7 @@ static void init_fsm_timer(struct fsm_timer *timer);
 
 static inline void mod_fsm_timer(struct fsm *fsm, unsigned long msec)
 {
-  if (fsm) {
+  if (fsm && fsm->run) {
     ++fsm->timer.idx;
     mod_timer(&fsm->timer.tl, jiffies + msecs_to_jiffies(msec));
   }
@@ -114,12 +116,15 @@ static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *));
 static void del_fsm_all(void);
 static void __del_fsm_callback(struct rcu_head *rp);
 static void __free_fsm(struct fsm *fsm);
+static void __release_fsm(struct kref *kref);
 
-#define add_fsm(ptr) do { \
-  spin_lock_irqsave(&fsm_list_lock, fsm_list_flags); \
-  list_add_rcu(&ptr->fsm_list, &fsm_list); \
-  spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);	\
- } while(0)
+#define add_fsm(ptr) do {					\
+    fsm->run = 1;						\
+    kref_init(&fsm->kref);					\
+    spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);		\
+    list_add_rcu(&ptr->fsm_list, &fsm_list);			\
+    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);	\
+  } while(0)
 
 
 #define FIRST_FSM list_first_entry(&fsm_list, struct fsm, fsm_list)
