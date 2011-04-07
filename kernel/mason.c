@@ -46,6 +46,7 @@ static unsigned long fsm_list_flags = 0;
  * ************************************************************** */
 static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb)
 {
+  int rc;
   GET_RND_INFO(fsm, rnd);
   enum fsm_state ret;
 
@@ -62,12 +63,14 @@ static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb)
     /* Save info from packet */
     rnd_info_set_dev(rnd, skb->dev);
     rnd->rnd_id = mason_round_id(skb);
-    if (0 > add_identity(rnd, 0, mason_init_pubkey(skb))
-	|| 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
+    if (-EEXIST == (rc = add_identity(rnd, 0, mason_init_pubkey(skb))))
+      goto cont;
+    else if (0 > rc || 0 > mason_id_set_hwaddr(rnd->tbl->ids[0], skb)) {
       mason_logd_label(rnd, "failed to add identity of initiator");
       goto err;
     }
 
+  cont:
     /* Set the public key */
     get_random_bytes(rnd->pub_key, sizeof(rnd->pub_key));
 
@@ -356,6 +359,7 @@ static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
 
 static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
 {
+  int rc;
   unsigned char *hwaddr;
   
   if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
@@ -367,15 +371,14 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
   del_fsm_timer(&rnd->fsm);
   
   /* If the identity is new, add it to the round */
-  if ( !id_table_contains_pub_key(rnd->tbl, mason_par_pubkey(skb)) ) {
-    if (0 > add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))
-	|| 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb)  ) {
-      return fsm_s_abort(rnd, "unable to add identity from PAR packet");
-    }
-    log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
-  }
+  if (-EEXIST == (rc = add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))) )
+    goto ack;
+  else if (0 > rc || 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb))
+    return fsm_s_abort(rnd, "unable to add identity from PAR packet");
+  log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
   
-  /* Send an acknowledgement, even if the identity is a duplicate */
+  /* Send an acknowledgement, even if the identity was a duplicate */
+ ack:
   hwaddr = kmalloc(skb->dev->addr_len, GFP_ATOMIC);
   if (!hwaddr) {
     mason_loge_label(rnd, "failed to allocate memory for hwaddr");
@@ -1187,12 +1190,14 @@ static void del_fsm_all(void)
 
 static void del_fsm(struct fsm *fsm, void (*free_child)(struct fsm *)) 
 {
-  fsm->run = 0;
-  spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);
-  list_del_rcu(&fsm->fsm_list);
-  spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);
-  fsm->__free_child = free_child;
-  call_rcu(&fsm->rcu, __del_fsm_callback);
+  if (fsm->run) { /* If already deleted, don't delete again */
+    fsm->run = 0;
+    spin_lock_irqsave(&fsm_list_lock, fsm_list_flags);
+    list_del_rcu(&fsm->fsm_list);
+    spin_unlock_irqrestore(&fsm_list_lock, fsm_list_flags);
+    fsm->__free_child = free_child;
+    call_rcu(&fsm->rcu, __del_fsm_callback);
+  }
 }
 
 static void __del_fsm_callback(struct rcu_head *rp)
@@ -1249,6 +1254,9 @@ static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 
   struct id_table *tbl;
   struct mason_id *mid;
   tbl = rnd->tbl;
+
+  if (id_table_contains_pub_key(tbl, pub_key))
+    return -EEXIST;
 
   mid = kmalloc(sizeof(struct mason_id), GFP_ATOMIC);
   if (!mid) {
