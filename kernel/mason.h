@@ -23,9 +23,16 @@
 #define MAX_PAR_CNT 10
 
 #define CLIENT_TIMEOUT 1000
-#define PAR_TIMEOUT 500
+#define PAR_TIMEOUT 1000
 #define CLIENT_PARACK_TIMEOUT 200
-#define CLIENT_PARLIST_TIMEOUT (CLIENT_PARACK_TIMEOUT * MAX_PAR_CNT)
+#define CLIENT_PARLIST_TIMEOUT (MAX_PARTICIPANTS * (70 + 10)) /* 70 ms
+								 is
+								 stagger
+								 interval.
+								 10 ms
+								 is
+								 arbitrary
+								 buffer. */
 #define MEAS_TIMEOUT 30
 #define RSST_TIMEOUT 100
 
