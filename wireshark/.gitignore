@@ -1,0 +1,9 @@
+.deps/
+.libs/
+Makefile
+Makefile.in
+mason.la
+packet-mason.lo
+plugin.c
+plugin.lo
+pub
