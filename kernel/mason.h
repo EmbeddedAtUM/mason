@@ -302,7 +302,7 @@ static struct rnd_info *new_rnd_info_shared(struct id_table *tbl);
 static void free_rnd_info(struct fsm *fsm);
 static void __release_id_table(struct kref *kref);
 static void free_id_table(struct id_table *ptr);
-static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid);
+static int id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid);
 static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_mason_id(struct mason_id *ptr);
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[]);

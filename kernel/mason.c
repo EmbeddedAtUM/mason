@@ -366,15 +366,14 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
   if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
     return fsm_s_par;
   
-  if (MAX_PARTICIPANTS - 1 == rnd->tbl->max_id)
-    return fsm_s_abort(rnd, "participant limit exceeded");
-  
   del_fsm_timer(&rnd->fsm);
   pub_key = mason_par_pubkey(skb);
   
   /* If the identity is new, add it to the round */
-  if (-EEXIST == (rc = add_identity(rnd, ++rnd->tbl->max_id, pub_key)) )
+  if (-EEXIST == (rc = add_identity(rnd, ++rnd->tbl->max_id, pub_key)) ) {
+    --rnd->tbl->max_id; /* not new identity, so undo increment */
     goto ack;
+  }
   else if (0 > rc || 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb))
     return fsm_s_abort(rnd, "unable to add identity from PAR packet");
   log_addr_netlink(rnd->rnd_id, rnd->tbl->max_id, skb);
@@ -1254,12 +1253,15 @@ static void free_mason_id(struct mason_id *ptr)
   kfree(ptr);
 }
 
-static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
+static int id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
 {
+  if (MAX_PARTICIPANTS - 1 < mid->id)
+    return -EINVAL;
   hlist_add_head(&mid->hlist, &tbl->ht[pub_key_hash(mid->pub_key)]);
   tbl->ids[mid->id] = mid;
   if ( mid->id > tbl->max_id )
     tbl->max_id = mid->id;
+  return 0;
 }
 
 static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key)
@@ -1277,9 +1279,7 @@ static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 
     return -ENOMEM;
   }
   mason_id_init(mid, sender_id, pub_key);
-  id_table_add_mason_id(tbl, mid);
-
-  return 0;
+  return id_table_add_mason_id(tbl, mid);
 }
 
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
