@@ -261,6 +261,18 @@ static inline bool id_table_contains_pub_key(const struct id_table *tbl, const _
   return false;
 }
 
+/* Returns 0 if no match */
+static inline __u16 id_table_id_from_pub_key(const struct id_table *tbl, const __u8 pub_key[])
+{
+  struct mason_id *m;
+  struct hlist_node *pos;
+  hlist_for_each_entry(m, pos, &tbl->ht[pub_key_hash(pub_key)], hlist) {
+    if (0 == memcmp(pub_key, m->pub_key, RSA_LEN))
+      return m->id;
+  }
+  return 0;
+}
+
 /* Information associated with a round */
 struct rnd_info {
   struct fsm fsm;
@@ -308,7 +320,7 @@ static int send_mason_packet(struct sk_buff *skb, unsigned char *hwaddr);
 static int bcast_mason_packet(struct sk_buff *skb);
 static struct sk_buff *create_mason_init(struct rnd_info *rnd);
 static struct sk_buff *create_mason_par(struct rnd_info *rnd);
-static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u8 pub_key[]);
+static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[]);
 static struct sk_buff *create_mason_parlist(struct rnd_info *rnd, __u16 *start_id);
 static struct sk_buff *create_mason_txreq(struct rnd_info *rnd, __u16 id);
 static struct sk_buff *create_mason_meas(struct rnd_info *rnd);

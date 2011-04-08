@@ -138,8 +138,14 @@ static inline __u8 *mason_par_pubkey(const struct sk_buff *skb)
 
 /* participate acknowledgement packet */
 struct parack_masonpkt {
+  __u16 id;
   __u8 pub_key[RSA_LEN];
 } __attribute__((__packed__));
+
+static inline __u16 mason_parack_id(const struct sk_buff *skb)
+{
+  return ntohs(((struct parack_masonpkt *)(mason_typehdr(skb)))->id);
+}
 
 static inline __u8 *mason_parack_pubkey(const struct sk_buff *skb)
 {

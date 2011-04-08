@@ -361,6 +361,7 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
 {
   int rc;
   unsigned char *hwaddr;
+  __u8 *pub_key;
   
   if (!pskb_may_pull(skb, sizeof(struct par_masonpkt))) 
     return fsm_s_par;
@@ -369,9 +370,10 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
     return fsm_s_abort(rnd, "participant limit exceeded");
   
   del_fsm_timer(&rnd->fsm);
+  pub_key = mason_par_pubkey(skb);
   
   /* If the identity is new, add it to the round */
-  if (-EEXIST == (rc = add_identity(rnd, ++rnd->tbl->max_id, mason_par_pubkey(skb))) )
+  if (-EEXIST == (rc = add_identity(rnd, ++rnd->tbl->max_id, pub_key)) )
     goto ack;
   else if (0 > rc || 0 > mason_id_set_hwaddr(rnd->tbl->ids[rnd->tbl->max_id], skb))
     return fsm_s_abort(rnd, "unable to add identity from PAR packet");
@@ -385,9 +387,12 @@ static enum fsm_state handle_par(struct rnd_info *rnd, struct sk_buff *skb)
     goto out;
   }
   dev_parse_header(skb, hwaddr);
-  if (0 != send_mason_packet(create_mason_parack(rnd, mason_par_pubkey(skb)), hwaddr))
+  if (0 != send_mason_packet(create_mason_parack(rnd,
+						 id_table_id_from_pub_key(rnd->tbl, pub_key),
+						 pub_key),
+			     hwaddr))
     mason_loge_label(rnd, "failed to send PARACK packet");
-  
+
  out:
   mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
   return fsm_s_par;
@@ -815,7 +820,7 @@ static struct sk_buff *create_mason_par(struct rnd_info *rnd)
   return skb;
 }
 
-static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u8 pub_key[])
+static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[])
 {
   struct sk_buff *skb;
   struct parack_masonpkt *typehdr;
@@ -827,6 +832,7 @@ static struct sk_buff *create_mason_parack(struct rnd_info *rnd, const __u8 pub_
   /* Set the type-specific data */
   skb_put(skb, sizeof(struct parack_masonpkt));
   typehdr = (struct parack_masonpkt *)mason_typehdr(skb);
+  typehdr->id = htons(id);
   memcpy(typehdr->pub_key, pub_key, sizeof(typehdr->pub_key));
   return skb;
 }
