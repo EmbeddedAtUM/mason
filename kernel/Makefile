@@ -33,3 +33,6 @@ adbrm:
 	adb shell 'rmmod mason.ko'
 adbdmesg:
 	adb shell 'dmesg'
+adbperm:
+	adb shell 'chmod 0222 /proc/net/mason_initiate'
+	adb shell 'chmod 0666 /sys/module/mason/parameters/numids'
