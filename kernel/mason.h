@@ -300,7 +300,6 @@ static inline void rnd_info_set_dev(struct rnd_info *rnd, struct net_device *dev
 static struct rnd_info *new_rnd_info(void);
 static struct rnd_info *new_rnd_info_shared(struct id_table *tbl);
 static void free_rnd_info(struct fsm *fsm);
-static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[]);
 static void __release_id_table(struct kref *kref);
 static void free_id_table(struct id_table *ptr);
 static void id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid);

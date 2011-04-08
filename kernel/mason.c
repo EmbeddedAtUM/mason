@@ -121,7 +121,6 @@ static void import_mason_parlist(struct rnd_info *rnd, struct sk_buff *skb)
   data = mason_data(skb);
   for(i = start_id; i < count + start_id; ++i) {
     add_identity(rnd, i, data);
-    rnd_info_set_id_cond(rnd, i, data);
     data += RSA_LEN;
   }
 }
@@ -144,13 +143,14 @@ handle_parack(struct rnd_info *rnd, struct sk_buff *skb)
     ret = fsm_c_parack;
   }
 
-  if (0 == memcmp(mason_parack_pubkey(skb), rnd->pub_key, RSA_LEN)) {
+  if (0 == memcmp(mason_parack_pubkey(skb), rnd->pub_key, RSA_LEN) && (mason_parack_id(skb) < (MAX_PARTICIPANTS - 1)) ) {
     /* Acknowledgement received */
     del_fsm_timer(&rnd->fsm);
+    rnd->my_id = mason_parack_id(skb);
     mod_fsm_timer(&rnd->fsm, CLIENT_PARLIST_TIMEOUT);
     ret = fsm_c_parlist;
   } else {
-    /* Not our acknowledgement */
+    /* Not a valid acknowledgement for us */
     ret = fsm_c_parack;
   }
 
@@ -1280,13 +1280,6 @@ static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 
   id_table_add_mason_id(tbl, mid);
 
   return 0;
-}
-
-/* Sets the id of the round if the given public key matches */
-static void rnd_info_set_id_cond(struct rnd_info *rnd, const __u16 id, const __u8 pub_key[])
-{
-  if (0 == memcmp(rnd->pub_key, pub_key, RSA_LEN))
-    rnd->my_id = id;
 }
 
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
