@@ -25,6 +25,14 @@
 #define SIG_MASK         0x01
 #define GET_MASON_SIG(val)     (((unsigned char)(val)) & SIG_MASK)
 
+#define RSA_FSTR "%02x%02x%02x%02x%02x%02x..."
+#define RSA_VARG(ptr,off)  tvb_get_guint8((ptr), (off)),	\
+    tvb_get_guint8((ptr), (off)+1),				\
+    tvb_get_guint8((ptr), (off)+2),				\
+    tvb_get_guint8((ptr), (off)+3),				\
+    tvb_get_guint8((ptr), (off)+4),				\
+    tvb_get_guint8((ptr), (off)+5)				\
+
 static const value_string mason_type_names[] = {
   {0, "INIT"},
   {1, "PAR"},
@@ -254,6 +262,7 @@ process_init(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   proto_item *init_tree = NULL;
   
   show_dst_identity(pinfo, -1);
+  col_append_fstr(pinfo->cinfo, COL_INFO, RSA_FSTR, RSA_VARG(tvb, *offset));
 
   if (tree) {
     ti = proto_tree_add_text(tree, tvb, 0, 0, "Init");
@@ -271,6 +280,7 @@ process_par(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   
   show_src_identity(pinfo, -1); /* Override source address */
   show_dst_identity(pinfo, 0);
+  col_append_fstr(pinfo->cinfo, COL_INFO, "        "RSA_FSTR, RSA_VARG(tvb, *offset));
 
   if (tree) {
     ti = proto_tree_add_text(tree, tvb, 0, 0, "Par");
@@ -288,6 +298,7 @@ process_parack(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree
   
   guint16 dest_id = tvb_get_ntohs(tvb, *offset);
   show_dst_identity(pinfo, dest_id);
+  col_append_fstr(pinfo->cinfo, COL_INFO, "%3d <-> "RSA_FSTR, dest_id, RSA_VARG(tvb, *offset +2));
   
   if (tree) {
     ti = proto_tree_add_text(tree, tvb, 0, 0, "Parack");
@@ -315,6 +326,7 @@ process_parlist(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tre
   int i;
 
   show_dst_identity(pinfo, -1);
+  col_append_fstr(pinfo->cinfo, COL_INFO, "%2d partipicants from id %3d", count, start_id);
 
   if (tree) {
     ti = proto_tree_add_text(tree, tvb, 0, 0, "Parlist");
@@ -328,28 +340,14 @@ process_parlist(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tre
     for (i = 0; i < count; i++) {
       par_item = proto_tree_add_text(data_tree, tvb,
 				     *offset+4 + i*RSA_LEN, RSA_LEN,
-				     "Participant %03d (%02x%02x%02x%02x%02x%02x...)",
+				     "Participant %3d ("RSA_FSTR")",
 				     start_id + i,
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 0),
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 1),
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 2),
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 3),
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 4),
-				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 5));
+				     RSA_VARG(tvb, *offset+4 + i*RSA_LEN));
       par_tree = proto_item_add_subtree(par_item, ett_parlist_par);
-      proto_tree_add_text(par_tree, tvb, 0, 0, "Id: %03d", start_id + i);
+      proto_tree_add_text(par_tree, tvb, 0, 0, "Id: %3d", start_id + i);
       proto_tree_add_item(par_tree, hf_mason_par_pubkey, tvb, *offset+4 + i*RSA_LEN, RSA_LEN, FALSE);
     }
   }
-}
-
-static void
-process_meas(tvbuff_t __attribute__((__unused__)) *tvb, 
-	     packet_info  *pinfo, 
-	     gint __attribute__((__unused__)) *offset, 
-	     proto_tree __attribute__((__unused__)) *tree)
-{
-  show_dst_identity(pinfo, -1);
 }
 
 static void
@@ -360,6 +358,7 @@ process_txreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   
   guint16 dest_id = tvb_get_ntohs(tvb, *offset);
   show_dst_identity(pinfo, dest_id);
+  col_append_fstr(pinfo->cinfo, COL_INFO, "-> %3d", dest_id);
   
   if (tree) {
     ti = proto_tree_add_text(tree, tvb, 0, 0, "TxReq");
@@ -367,6 +366,16 @@ process_txreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
     
     proto_tree_add_item(txreq_tree, hf_mason_txreq_id, tvb, *offset, 2, FALSE);
   }
+}
+
+static void
+process_meas(tvbuff_t *tvb,
+	     packet_info  *pinfo,
+	     gint *offset,
+	     proto_tree __attribute__((__unused__)) *tree)
+{
+  show_dst_identity(pinfo, -1);
+  col_append_fstr(pinfo->cinfo, COL_INFO, "<- %3d", tvb_get_ntohs(tvb, *offset-4));
 }
 
 static void
@@ -426,12 +435,14 @@ dissect_mason(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
   gint offset = 0;
   guint8 packet_type = GET_MASON_TYPE(tvb_get_guint8(tvb, 0));
   guint16 sender_id  = tvb_get_ntohs(tvb, 6);
-  
+  guint32 round_id = tvb_get_ntohl(tvb, 2);
+
   /* Set the info column */
   col_set_str(pinfo->cinfo, COL_PROTOCOL, "Mason");
   col_clear(pinfo->cinfo, COL_INFO);
-  col_add_fstr(pinfo->cinfo, COL_INFO, "Mason %s packet",
-	       val_to_str(packet_type, mason_type_names, "Unknown (0x%02x)"));
+  col_add_fstr(pinfo->cinfo, COL_INFO, "%7s (0x%08x): ",
+	       val_to_str(packet_type, mason_type_names, "Unknown (0x%02x)"),
+	       round_id);
   
   /* Clear the source and address columns. */
   SET_ADDRESS(&pinfo->src, AT_NONE, 0, NULL);
