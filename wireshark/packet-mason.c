@@ -38,10 +38,13 @@ static const value_string mason_type_names[] = {
   {0, NULL}
 };
 
+/* Handle to this dissector */
+static dissector_handle_t mason_handle;
+
+/* Protocol */
 static int proto_mason = -1;
 
-static gint ett_mason = -1;
-
+/* Header fields */
 static int hf_mason_version   = -1;
 static int hf_mason_type      = -1;
 static int hf_mason_sig       = -1;
@@ -50,12 +53,32 @@ static int hf_mason_rnd_id    = -1;
 static int hf_mason_sender_id = -1;
 static int hf_mason_pkt_uid   = -1;
 
-static int hf_mason_pub_key  = -1;
-static int hf_mason_id       = -1;
-static int hf_mason_txreq_id = -1;
-static int hf_mason_rsstreq_id = -1;
+/* Type-specific fields */
+static int hf_mason_init_pubkey     = -1;
+static int hf_mason_par_pubkey      = -1;
+static int hf_mason_parack_id       = -1;
+static int hf_mason_parack_pubkey   = -1;
+static int hf_mason_parlist_startid = -1;
+static int hf_mason_parlist_count   = -1;
+static int hf_mason_parlist_data    = -1;
+static int hf_mason_txreq_id        = -1;
+static int hf_mason_rsstreq_id      = -1;
+static int hf_mason_rsst_frag       = -1;
+static int hf_mason_rsst_len        = -1;
+static int hf_mason_rsst_data       = -1;
 
-static void
+/* Type-specific subtrees */
+static gint ett_mason   = -1;
+static gint ett_init    = -1;
+static gint ett_par     = -1;
+static gint ett_parack  = -1;
+static gint ett_parlist = -1;
+static gint ett_txreq   = -1;
+static gint ett_meas    = -1;
+static gint ett_rsstreq = -1;
+static gint ett_rsst    = -1;
+
+static void __attribute__((__unused__))
 show_src_identity(packet_info *pinfo, const gint16 id)
 {
   if (0 < id)
@@ -66,7 +89,7 @@ show_src_identity(packet_info *pinfo, const gint16 id)
     col_add_fstr(pinfo->cinfo, COL_DEF_SRC, "... (%s)", ep_address_to_str(&pinfo->dl_src));
 }
 
-static void
+static void __attribute__((__unused__))
 show_dst_identity(packet_info *pinfo, const gint16 id)
 {
   if (0 < id)
@@ -88,7 +111,7 @@ proto_register_mason(void)
       {"Version", "mason.version",
        FT_UINT8, BASE_DEC,
        NULL, VERSION_MASK,
-       NULL, HFILL } 
+       NULL, HFILL }
     },     
     { &hf_mason_type,
       {"Type", "mason.type",
@@ -121,41 +144,97 @@ proto_register_mason(void)
        NULL, HFILL }
     },
     { &hf_mason_pkt_uid,
-      {"Packet UID", "mason.packet_id",
+      {"Packet ID", "mason.packet_id",
        FT_UINT16, BASE_DEC,
        NULL, 0x0,
        NULL, HFILL }
     },
-    { &hf_mason_pub_key,
-      {"Public Key", "mason.pub_key",
+    { &hf_mason_init_pubkey,
+      {"Public Key", "mason.init.pubkey",
        FT_BYTES, BASE_NONE,
        NULL, 0x0,
        NULL, HFILL }
     },
-    { &hf_mason_id,
-      {"ID", "mason.id",
+    { &hf_mason_par_pubkey,
+      {"Public Key", "mason.par.pubkey",
+       FT_BYTES, BASE_NONE,
+       NULL, 0x0,
+       NULL, HFILL }
+    },
+    { &hf_mason_parack_id,
+      {"Id", "mason.parack.id",
        FT_UINT16, BASE_DEC,
        NULL, 0x0,
        NULL, HFILL }
     },
+    { &hf_mason_parack_pubkey,
+      {"Public Key", "mason.parack.pubkey",
+       FT_BYTES, BASE_NONE,
+       NULL, 0x0,
+       NULL, HFILL }
+    },
+    { &hf_mason_parlist_startid,
+      {"Start Id", "mason.parlist.startid",
+       FT_UINT16, BASE_DEC,
+       NULL, 0x0,
+       NULL, HFILL }
+    },
+    { &hf_mason_parlist_count,
+      {"Count", "mason.parlist.count",
+       FT_UINT16, BASE_DEC,
+       NULL, 0x0,
+       NULL, HFILL }
+    },
+    { &hf_mason_parlist_data,
+      {"Data", "mason.parlist.data",
+       FT_BYTES, BASE_NONE,
+       NULL, 0x0,
+       NULL, HFILL }
+    },
     { &hf_mason_txreq_id,
-      {"ID", "mason.txreq.id",
+      {"Id", "mason.txreq.id",
        FT_UINT16, BASE_DEC,
        NULL, 0x0,
        NULL, HFILL}
     },
     { &hf_mason_rsstreq_id,
-      {"ID", "mason.rsstreq.id",
+      {"Id", "mason.rsstreq.id",
        FT_UINT16, BASE_DEC,
+       NULL, 0x0,
+       NULL, HFILL}
+    },
+    { &hf_mason_rsst_frag,
+      {"Fragmented", "mason.rsst.frag",
+       FT_BOOLEAN, 8,
+       NULL, 0x0,
+       NULL, HFILL}
+    },
+    { &hf_mason_rsst_len,
+      {"Length", "mason.rsst.len",
+       FT_UINT16, BASE_DEC,
+       NULL, 0x0,
+       NULL, HFILL}
+    },
+    { &hf_mason_rsst_data,
+      {"Data", "mason.rsst.data",
+       FT_BYTES, BASE_NONE,
        NULL, 0x0,
        NULL, HFILL}
     }
   };
   
   static gint *ett[] = {
-    &ett_mason
+    &ett_mason,
+    &ett_init,
+    &ett_par,
+    &ett_parack,
+    &ett_parlist,
+    &ett_txreq,
+    &ett_meas,
+    &ett_rsstreq,
+    &ett_rsst
   };
-
+  
   proto_mason = proto_register_protocol("Mason Protocol",
 					"Mason",
 					"mason");
@@ -164,117 +243,207 @@ proto_register_mason(void)
   proto_register_subtree_array(ett, array_length(ett));
 }
 
+static void 
+process_init(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *init_tree = NULL;
+  
+  show_dst_identity(pinfo, -1);
+
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (INIT)");
+    init_tree = proto_item_add_subtree(ti, ett_init);
+    
+    proto_tree_add_item(init_tree, hf_mason_init_pubkey, tvb, *offset, RSA_LEN, FALSE);
+  }
+}
+
+static void
+process_par(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *par_tree = NULL;
+  
+  show_src_identity(pinfo, -1); /* Override source address */
+  show_dst_identity(pinfo, 0);
+
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PAR)");
+    par_tree = proto_item_add_subtree(ti, ett_par);
+    
+    proto_tree_add_item(par_tree, hf_mason_par_pubkey, tvb, *offset, RSA_LEN, FALSE);
+  }
+}
+
+static void
+process_parack(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *parack_tree = NULL;
+  
+  guint16 dest_id = tvb_get_ntohs(tvb, *offset);
+  show_dst_identity(pinfo, dest_id);
+  
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PARACK)");
+    parack_tree = proto_item_add_subtree(ti, ett_parack);
+
+    proto_tree_add_item(parack_tree, hf_mason_parack_id, tvb, *offset, 2, FALSE);    
+    proto_tree_add_item(parack_tree, hf_mason_parack_pubkey, tvb, *offset + 2, RSA_LEN, FALSE);
+  }
+}
+
+static void
+process_parlist(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *parlist_tree = NULL;
+  
+  guint16 count = tvb_get_ntohs(tvb, *offset+2);
+  guint16 data_len = count * (RSA_LEN);
+
+  show_dst_identity(pinfo, -1);
+
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PARLIST)");
+    parlist_tree = proto_item_add_subtree(ti, ett_parlist);
+    
+    proto_tree_add_item(parlist_tree, hf_mason_parlist_startid, tvb, *offset, 2, FALSE);
+    proto_tree_add_item(parlist_tree, hf_mason_parlist_count, tvb, *offset+2, 2, FALSE);
+    proto_tree_add_item(parlist_tree, hf_mason_parlist_data, tvb, *offset+4, data_len, FALSE);
+  }
+}
+
+static void
+process_meas(tvbuff_t __attribute__((__unused__)) *tvb, 
+	     packet_info  *pinfo, 
+	     gint __attribute__((__unused__)) *offset, 
+	     proto_tree __attribute__((__unused__)) *tree)
+{
+  show_dst_identity(pinfo, -1);
+}
+
+static void
+process_txreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *txreq_tree = NULL;
+  
+  guint16 dest_id = tvb_get_ntohs(tvb, *offset);
+  show_dst_identity(pinfo, dest_id);
+  
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (TXREQ)");
+    txreq_tree = proto_item_add_subtree(ti, ett_txreq);
+    
+    proto_tree_add_item(txreq_tree, hf_mason_txreq_id, tvb, *offset, 2, FALSE);
+  }
+}
+
+static void
+process_rsstreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *rsstreq_tree = NULL;
+  
+  guint16 dest_id = tvb_get_ntohs(tvb, *offset);
+  show_dst_identity(pinfo, dest_id);
+
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (RSSTREQ)");
+    rsstreq_tree = proto_item_add_subtree(ti, ett_rsstreq);
+    
+    proto_tree_add_item(rsstreq_tree, hf_mason_rsstreq_id, tvb, *offset, 2, FALSE);
+  }
+}
+
+static void
+process_rsst(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
+{
+  proto_item *ti = NULL;
+  proto_item *rsst_tree = NULL;
+  
+  guint16 data_len = tvb_get_ntohs(tvb, *offset+1);
+
+  show_dst_identity(pinfo, 0);
+
+  if (tree) {
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (RSST)");
+    rsst_tree = proto_item_add_subtree(ti, ett_rsst);
+    
+    proto_tree_add_item(rsst_tree, hf_mason_rsst_frag, tvb, *offset, 1, FALSE);
+    proto_tree_add_item(rsst_tree, hf_mason_rsst_len, tvb, *offset+1, 2, FALSE);
+    proto_tree_add_item(rsst_tree, hf_mason_rsst_data, tvb, *offset+3, data_len, FALSE);
+  }
+}
+
+static void (*process_table[])(tvbuff_t*, packet_info*, gint*, proto_tree*) = 
+{  process_init,
+   process_par,
+   process_parack,
+   process_parlist,
+   process_txreq,
+   process_meas,
+   process_rsstreq,
+   process_rsst
+};
+
 static void
 dissect_mason(tvbuff_t *tvb, packet_info *pinfo, proto_tree *tree)
 {
+  proto_item *ti = NULL;
+  proto_item *mason_tree = NULL;
+
+  gint offset = 0;
   guint8 packet_type = GET_MASON_TYPE(tvb_get_guint8(tvb, 0));
-  guint16 sender_id   = tvb_get_ntohs(tvb, 6);
+  guint16 sender_id  = tvb_get_ntohs(tvb, 6);
   
-  SET_ADDRESS(&pinfo->src, AT_NONE, 0, NULL);
-  SET_ADDRESS(&pinfo->dst, AT_NONE, 0, NULL);
-  COPY_ADDRESS(&pinfo->net_dst, &pinfo->dl_dst);
-  COPY_ADDRESS(&pinfo->net_src, &pinfo->dl_src);
-  
+  /* Set the info column */
   col_set_str(pinfo->cinfo, COL_PROTOCOL, "Mason");
   col_clear(pinfo->cinfo, COL_INFO);
-  col_add_fstr(pinfo->cinfo, COL_INFO, "Type %s",
+  col_add_fstr(pinfo->cinfo, COL_INFO, "Mason %s packet",
 	       val_to_str(packet_type, mason_type_names, "Unknown (0x%02x)"));
-
-  /* TODO: Replace all the switch statements in the following code
-     with per-type sub-dissectors */
-
-  /* TODO: Proper stateful decoding of source and destination
-     addresses by storing the public key<->ID assignments. The
-     following decoding assumes the packets are well-formed and
-     well-addressed. */
-
-  /* Set the source column display */
-  switch(packet_type) {
-  case MASON_PAR:
-    show_src_identity(pinfo, -1);
-    break;
-  case MASON_INIT:
-  case MASON_PARACK:
-  case MASON_PARLIST:
-  case MASON_TXREQ:
-  case MASON_MEAS:
-  case MASON_RSSTREQ:
-  case MASON_RSST:
-    show_src_identity(pinfo, sender_id);
-    break;
-  }
   
-  /* Set the destination column display */
-  switch(packet_type) {
-  case MASON_INIT:
-    show_dst_identity(pinfo, -1);
-    break;
-  case MASON_PAR:
-    show_dst_identity(pinfo, 0);
-    break;
-  case MASON_PARLIST:
-    show_dst_identity(pinfo, -1);
-    break;
-  case MASON_PARACK:
-  case MASON_TXREQ:
-  case MASON_RSSTREQ:
-    show_dst_identity(pinfo, tvb_get_ntohs(tvb, 10));
-    break;
-  case MASON_MEAS:
-    show_dst_identity(pinfo, -1);
-    break;
-  case MASON_RSST:
-    show_dst_identity(pinfo, 0);
-    break;
-  }
+  /* Clear the source and address columns. */
+  SET_ADDRESS(&pinfo->src, AT_NONE, 0, NULL);
+  COPY_ADDRESS(&pinfo->net_dst, &pinfo->dl_dst);
+  SET_ADDRESS(&pinfo->dst, AT_NONE, 0, NULL);
+  COPY_ADDRESS(&pinfo->net_src, &pinfo->dl_src);
+
+  /* Fill in the source column. The type-specific process_* methods
+     can later change this field and set the destination field.  */
+  show_src_identity(pinfo, sender_id);
   
+  /* Fill in the fields */
   if (tree) {
-    proto_item *ti = NULL;
-    proto_item *mason_tree = NULL;
-
     ti = proto_tree_add_protocol_format(tree, proto_mason, tvb, 0, -1, 
 					"Mason (%s)",		
 					val_to_str(packet_type,		
 						   mason_type_names, 
 						   "Unknown (0x%02x)"));
     mason_tree = proto_item_add_subtree(ti, ett_mason);
-
     proto_tree_add_item(mason_tree, hf_mason_version, tvb, 0, 1, FALSE);
     proto_tree_add_item(mason_tree, hf_mason_type, tvb, 0, 1, FALSE);
     proto_tree_add_item(mason_tree, hf_mason_sig, tvb, 0, 1, FALSE);
-    proto_tree_add_item(mason_tree, hf_mason_rssi, tvb, 1, 1, FALSE);
     proto_tree_add_item(mason_tree, hf_mason_rnd_id, tvb, 2, 4, FALSE);
     proto_tree_add_item(mason_tree, hf_mason_sender_id, tvb, 6, 2, FALSE);
     proto_tree_add_item(mason_tree, hf_mason_pkt_uid, tvb, 8, 2, FALSE);
+    proto_tree_add_item(mason_tree, hf_mason_rssi, tvb, 1, 1, FALSE); 
 
-    switch(packet_type) {
-    case MASON_INIT: 
-    case MASON_PAR:
-      proto_tree_add_item(mason_tree, hf_mason_pub_key, tvb, 10, RSA_LEN, FALSE);
-      break;
-    case MASON_PARACK:
-      proto_tree_add_item(mason_tree, hf_mason_id, tvb, 10, 2, FALSE);
-      proto_tree_add_item(mason_tree, hf_mason_pub_key, tvb, 11, RSA_LEN, FALSE);
-      break;
-    case MASON_PARLIST:
-      break;
-    case MASON_TXREQ:
-      proto_tree_add_item(mason_tree, hf_mason_txreq_id, tvb, 10, 2, FALSE);
-      break;
-    case MASON_RSSTREQ:
-      proto_tree_add_item(mason_tree, hf_mason_rsstreq_id, tvb, 10, 2, FALSE);
-      break;
-    }
   }
+
+  /* Add subtrees for packet type */
+  offset += 10;
+  if (packet_type < 8 && process_table[packet_type])
+    process_table[packet_type](tvb, pinfo, &offset, mason_tree);   
 }
 
 /* Initialize the dissector */
 void
 proto_reg_handoff_mason(void)
 {
-  static dissector_handle_t mason_handle;
+
   mason_handle = create_dissector_handle(dissect_mason, proto_mason);
   dissector_add_uint("ethertype", ETH_P_MASON, mason_handle);
 }
-
-
