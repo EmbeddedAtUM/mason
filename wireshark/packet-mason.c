@@ -54,18 +54,18 @@ static int hf_mason_sender_id = -1;
 static int hf_mason_pkt_uid   = -1;
 
 /* Type-specific fields */
-static int hf_mason_init_pubkey     = -1;
-static int hf_mason_par_pubkey      = -1;
-static int hf_mason_parack_id       = -1;
-static int hf_mason_parack_pubkey   = -1;
-static int hf_mason_parlist_startid = -1;
-static int hf_mason_parlist_count   = -1;
-static int hf_mason_parlist_data    = -1;
-static int hf_mason_txreq_id        = -1;
-static int hf_mason_rsstreq_id      = -1;
-static int hf_mason_rsst_frag       = -1;
-static int hf_mason_rsst_len        = -1;
-static int hf_mason_rsst_data       = -1;
+static int hf_mason_init_pubkey        = -1;
+static int hf_mason_par_pubkey         = -1;
+static int hf_mason_parack_id          = -1;
+static int hf_mason_parack_pubkey      = -1;
+static int hf_mason_parlist_startid    = -1;
+static int hf_mason_parlist_count      = -1;
+static int hf_mason_parlist_par_pubkey = -1;
+static int hf_mason_txreq_id           = -1;
+static int hf_mason_rsstreq_id         = -1;
+static int hf_mason_rsst_frag          = -1;
+static int hf_mason_rsst_len           = -1;
+static int hf_mason_rsst_data          = -1;
 
 /* Type-specific subtrees */
 static gint ett_mason   = -1;
@@ -73,6 +73,8 @@ static gint ett_init    = -1;
 static gint ett_par     = -1;
 static gint ett_parack  = -1;
 static gint ett_parlist = -1;
+static gint ett_parlist_data = -1;
+static gint ett_parlist_par  = -1;
 static gint ett_txreq   = -1;
 static gint ett_meas    = -1;
 static gint ett_rsstreq = -1;
@@ -185,8 +187,8 @@ proto_register_mason(void)
        NULL, 0x0,
        NULL, HFILL }
     },
-    { &hf_mason_parlist_data,
-      {"Data", "mason.parlist.data",
+    { &hf_mason_parlist_par_pubkey,
+      {"Public Key", "mason.parlist.par.pubkey",
        FT_BYTES, BASE_NONE,
        NULL, 0x0,
        NULL, HFILL }
@@ -229,6 +231,8 @@ proto_register_mason(void)
     &ett_par,
     &ett_parack,
     &ett_parlist,
+    &ett_parlist_data,
+    &ett_parlist_par,
     &ett_txreq,
     &ett_meas,
     &ett_rsstreq,
@@ -252,7 +256,7 @@ process_init(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   show_dst_identity(pinfo, -1);
 
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (INIT)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Init");
     init_tree = proto_item_add_subtree(ti, ett_init);
     
     proto_tree_add_item(init_tree, hf_mason_init_pubkey, tvb, *offset, RSA_LEN, FALSE);
@@ -269,7 +273,7 @@ process_par(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   show_dst_identity(pinfo, 0);
 
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PAR)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Par");
     par_tree = proto_item_add_subtree(ti, ett_par);
     
     proto_tree_add_item(par_tree, hf_mason_par_pubkey, tvb, *offset, RSA_LEN, FALSE);
@@ -286,7 +290,7 @@ process_parack(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree
   show_dst_identity(pinfo, dest_id);
   
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PARACK)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Parack");
     parack_tree = proto_item_add_subtree(ti, ett_parack);
 
     proto_tree_add_item(parack_tree, hf_mason_parack_id, tvb, *offset, 2, FALSE);    
@@ -300,18 +304,42 @@ process_parlist(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tre
   proto_item *ti = NULL;
   proto_item *parlist_tree = NULL;
   
+  proto_item *data_item = NULL;
+  proto_item *data_tree = NULL;
+  proto_item *par_item = NULL;
+  proto_item *par_tree = NULL;
+
+  guint16 start_id = tvb_get_ntohs(tvb, *offset);
   guint16 count = tvb_get_ntohs(tvb, *offset+2);
-  guint16 data_len = count * (RSA_LEN);
+  
+  int i;
 
   show_dst_identity(pinfo, -1);
 
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (PARLIST)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "Parlist");
     parlist_tree = proto_item_add_subtree(ti, ett_parlist);
     
     proto_tree_add_item(parlist_tree, hf_mason_parlist_startid, tvb, *offset, 2, FALSE);
     proto_tree_add_item(parlist_tree, hf_mason_parlist_count, tvb, *offset+2, 2, FALSE);
-    proto_tree_add_item(parlist_tree, hf_mason_parlist_data, tvb, *offset+4, data_len, FALSE);
+    data_item = proto_tree_add_text(parlist_tree, tvb, 0, 0, "Participants");
+    data_tree = proto_item_add_subtree(data_item, ett_parlist_data);
+    
+    for (i = 0; i < count; i++) {
+      par_item = proto_tree_add_text(data_tree, tvb,
+				     *offset+4 + i*RSA_LEN, RSA_LEN,
+				     "Participant %03d (%02x%02x%02x%02x%02x%02x...)",
+				     start_id + i,
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 0),
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 1),
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 2),
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 3),
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 4),
+				     tvb_get_guint8(tvb, *offset+4 + i*RSA_LEN + 5));
+      par_tree = proto_item_add_subtree(par_item, ett_parlist_par);
+      proto_tree_add_text(par_tree, tvb, 0, 0, "Id: %03d", start_id + i);
+      proto_tree_add_item(par_tree, hf_mason_par_pubkey, tvb, *offset+4 + i*RSA_LEN, RSA_LEN, FALSE);
+    }
   }
 }
 
@@ -334,7 +362,7 @@ process_txreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   show_dst_identity(pinfo, dest_id);
   
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (TXREQ)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "TxReq");
     txreq_tree = proto_item_add_subtree(ti, ett_txreq);
     
     proto_tree_add_item(txreq_tree, hf_mason_txreq_id, tvb, *offset, 2, FALSE);
@@ -351,7 +379,7 @@ process_rsstreq(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tre
   show_dst_identity(pinfo, dest_id);
 
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (RSSTREQ)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "RSSTReq");
     rsstreq_tree = proto_item_add_subtree(ti, ett_rsstreq);
     
     proto_tree_add_item(rsstreq_tree, hf_mason_rsstreq_id, tvb, *offset, 2, FALSE);
@@ -369,7 +397,7 @@ process_rsst(tvbuff_t *tvb, packet_info *pinfo, gint *offset, proto_tree *tree)
   show_dst_identity(pinfo, 0);
 
   if (tree) {
-    ti = proto_tree_add_text(tree, tvb, 0, 0, "Data (RSST)");
+    ti = proto_tree_add_text(tree, tvb, 0, 0, "RSST");
     rsst_tree = proto_item_add_subtree(ti, ett_rsst);
     
     proto_tree_add_item(rsst_tree, hf_mason_rsst_frag, tvb, *offset, 1, FALSE);
