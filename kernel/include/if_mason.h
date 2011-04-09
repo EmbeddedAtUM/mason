@@ -11,7 +11,14 @@
 #define _IF_MASON_H
 
 #include <linux/types.h>
+
+#ifdef __KERNEL__
 #include <linux/skbuff.h>
+#endif
+
+#ifndef __KERNEL__
+#include <asm/byteorder.h>
+#endif
 
 /* Packet sizes */
 #define LL_MTU  1500 /* TODO: This should be determined dynamically from
@@ -36,7 +43,7 @@
 #define MASON_RSST    0x7
 #define MASON_ABORT   0x8
 
-static const char* MASON_TYPES[] = {
+static const char __attribute__((__unused__)) *MASON_TYPES[] = {
   "INIT",
   "PAR",
   "PARACK",
@@ -67,6 +74,7 @@ struct masonhdr {
   __be16 pkt_uid;
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline struct masonhdr *mason_hdr(const struct sk_buff *skb)
 {
   return (struct masonhdr *)skb_network_header(skb);
@@ -115,26 +123,31 @@ static inline void *mason_typehdr(const struct sk_buff *skb)
 {
   return mason_hdr(skb) + 1;
 }
+#endif
 
 /* initiate packet */
 struct init_masonpkt {
   __u8 pub_key[RSA_LEN];
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u8 *mason_init_pubkey(const struct sk_buff *skb)
 {
   return ((struct init_masonpkt *)(mason_typehdr(skb)))->pub_key;
 }
+#endif
 
 /* participate packet */
 struct par_masonpkt {
   __u8 pub_key[RSA_LEN];
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u8 *mason_par_pubkey(const struct sk_buff *skb)
 {
   return ((struct par_masonpkt *)(mason_typehdr(skb)))->pub_key;
 }
+#endif
 
 /* participate acknowledgement packet */
 struct parack_masonpkt {
@@ -142,6 +155,7 @@ struct parack_masonpkt {
   __u8 pub_key[RSA_LEN];
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u16 mason_parack_id(const struct sk_buff *skb)
 {
   return ntohs(((struct parack_masonpkt *)(mason_typehdr(skb)))->id);
@@ -151,6 +165,7 @@ static inline __u8 *mason_parack_pubkey(const struct sk_buff *skb)
 {
   return ((struct parack_masonpkt *)(mason_typehdr(skb)))->pub_key;
 }
+#endif
 
 /* participant list packet */
 struct parlist_masonpkt {
@@ -158,6 +173,7 @@ struct parlist_masonpkt {
   __be16 count; /* Number of keys in this packet */
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u16 mason_parlist_id(const struct sk_buff *skb)
 {
   return ntohs(((struct parlist_masonpkt *)mason_typehdr(skb))->start_id);
@@ -167,16 +183,19 @@ static inline __u16 mason_parlist_count(const struct sk_buff *skb)
 {
   return ntohs(((struct parlist_masonpkt *)mason_typehdr(skb))->count);
 }
+#endif
 
 /* transmit request packet */
 struct txreq_masonpkt {
   __be16 id;
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u16 mason_txreq_id(const struct sk_buff *skb)
 {
   return ntohs(((struct txreq_masonpkt *)mason_typehdr(skb))->id);
 }
+#endif
 
 /* rssi measurement packet */
 struct meas_masonpkt {
@@ -187,10 +206,12 @@ struct rsstreq_masonpkt {
   __be16 id;
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u16 mason_rsstreq_id(const struct sk_buff *skb)
 {
   return ntohs(((struct rsstreq_masonpkt *)mason_typehdr(skb))->id);
 }
+#endif
 
 /* RSST packet */
 struct rsst_masonpkt {
@@ -202,6 +223,7 @@ struct rsst_masonpkt {
   __be16 len;
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 static inline __u16 mason_rsst_len(const struct sk_buff *skb)
 {
   return ntohs(((struct rsst_masonpkt *)mason_typehdr(skb))->len);
@@ -211,16 +233,19 @@ static inline __u8 mason_rsst_is_frag(const struct sk_buff *skb)
 {
   return ((struct rsst_masonpkt *)mason_typehdr(skb))->frag;
 }
+#endif
 
 /* Abort packet */
 struct abort_masonpkt {
 } __attribute__((__packed__));
 
+#ifdef __KERNEL__
 /*
  * Returns pointer to the start of any variable length data the packet
  * may contain.  This is just past the end of the typehdr.
  */
 extern void *mason_data(const struct sk_buff *skb);
+#endif
 
 /* 
  * Tail of packet containing signature.  The inclusion of a tail is
@@ -230,7 +255,8 @@ struct masontail {
   __u8 sig[RSA_LEN];
 };
 
+#ifdef __KERNEL__
 extern struct masontail *mason_tail(const struct sk_buff *skb);
-
+#endif
 
 #endif /* _IF_MASON_H */
