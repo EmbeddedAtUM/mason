@@ -35,6 +35,7 @@ static const value_string mason_type_names[] = {
   {6, "RSSTREQ"},
   {7, "RSST"},
   {8, "ABORT"},
+  {0, NULL}
 };
 
 static int proto_mason = -1;
