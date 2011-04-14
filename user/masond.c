@@ -18,7 +18,22 @@
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <netinet/in.h>
-#include <endian.h>
+
+#if defined(__linux__)
+#  include <endian.h>
+#  if defined(ANDROID)
+#    define be16toh(x) betoh16(x)
+#    define be32toh(x) betoh32(x)
+#    define be64toh(x) betoh64(x)
+#  endif
+#elif defined(__FreeBSD__) || defined(__NetBSD__)
+#  include <sys/endian.h>
+#elif defined(__OpenBSD__)
+#  include <sys/types.h>
+#  define be16toh(x) betoh16(x)
+#  define be32toh(x) betoh32(x)
+#  define be64toh(x) betoh64(x)
+#endif
 
 #include "nl_mason.h"
 
