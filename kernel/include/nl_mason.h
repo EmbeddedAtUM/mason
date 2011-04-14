@@ -25,18 +25,18 @@
 struct mason_nl_recv {
   __be32 rnd_id;
   __be16 my_id;
-  __be16 pos;
   __be16 pkt_id;
   __be16 sender_id;
   __s8 rssi;
-}__attribute__((__packed__)); /* 13 bytes */
+  __be64 time_ns;
+}__attribute__((__packed__)); /* 19 bytes */
 
 struct mason_nl_send {
   __be32 rnd_id;
   __be16 my_id;
-  __be16 pos;
   __be16 pkt_id;
-}__attribute__((__packed__)); /* 10 bytes */
+  __be64 time_ns;
+}__attribute__((__packed__)); /* 16 bytes */
 
 struct mason_nl_addr {
   __be32 rnd_id;
@@ -45,6 +45,8 @@ struct mason_nl_addr {
   char   addr[12];
 }__attribute__((__packed__)); /* 20 bytes */
 
+
+#ifdef __KERNEL__
 static inline void set_mason_nl_addr(struct mason_nl_addr *adr, __u32 rnd_id,
 				     __u16 id, __u16 addrlen, char hwaddr[])
 {
@@ -57,28 +59,29 @@ static inline void set_mason_nl_addr(struct mason_nl_addr *adr, __u32 rnd_id,
 }
 
 static inline void set_mason_nl_recv(struct mason_nl_recv *rec, __u32 rnd_id,
-				     __u16 my_id, __u16 pos, __u16 pkt_id, 
-				     __u16 sender_id, __s8 rssi)
+				     __u16 my_id, __u16 pkt_id, __u16 sender_id,
+				     __s8 rssi, ktime_t ktime)
 {
   if (!rec)
     return;
   rec->rnd_id = htonl(rnd_id);
   rec->my_id = htons(my_id);
-  rec->pos = htons(pos);
   rec->pkt_id = htons(pkt_id);
   rec->sender_id = htons(sender_id);
   rec->rssi = rssi;
+  rec->time_ns = __cpu_to_be64(ktime_to_ns(ktime));
 }
 
 static inline void set_mason_nl_send(struct mason_nl_send *snd, __u32 rnd_id,
-				     __u16 my_id, __u16 pos, __u16 pkt_id)
+				     __u16 my_id, __u16 pkt_id, ktime_t ktime)
 {
   if (!snd)
     return;
   snd->rnd_id = htonl(rnd_id);
   snd->my_id = htons(my_id);
-  snd->pos = htons(pos);
   snd->pkt_id = htons(pkt_id);
+  snd->time_ns =  __cpu_to_be64(ktime_to_ns(ktime));
 }
+#endif
 
 #endif /* _NL_MASON_H */

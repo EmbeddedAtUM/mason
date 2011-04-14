@@ -62,6 +62,7 @@ static enum fsm_state fsm_c_init_packet(struct fsm *fsm, struct sk_buff *skb)
 
     /* Save info from packet */
     rnd_info_set_dev(rnd, skb->dev);
+    net_enable_timestamp();
     rnd->rnd_id = mason_round_id(skb);
     if (-EEXIST == (rc = add_identity(rnd, 0, mason_init_pubkey(skb))))
       goto cont;
@@ -194,7 +195,7 @@ handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
     if (mason_txreq_id(skb) == rnd->my_id) {
       skbr = create_mason_meas(rnd);
       if (skbr) {
-	log_send_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skbr));
+	log_send_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skbr), ktime_get_real());
 	bcast_mason_packet(skbr);
       } 
     }
@@ -206,7 +207,7 @@ handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb)
 {
   del_fsm_timer(&rnd->fsm);
-  log_receive_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb));
+  log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
   mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   return fsm_c_txreq;
@@ -402,7 +403,7 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
   if (mason_sender_id(skb) != rnd->txreq_id) 
     return fsm_s_meas;
   del_fsm_timer(&rnd->fsm);
-  log_receive_netlink(rnd->rnd_id, rnd->my_id, 0, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb));
+  log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
   record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
   return handle_next_txreq(rnd);
 }
@@ -1142,8 +1143,10 @@ static void free_rnd_info(struct fsm *fsm)
   
   if (rnd->tbl)
     kref_put(&(rnd->tbl)->kref, __release_id_table);
-  if (rnd->dev)
+  if (rnd->dev) {
     dev_put(rnd->dev);
+    net_disable_timestamp();
+  }
   
   kfree(rnd);
 }
@@ -1493,6 +1496,8 @@ static int write_pfs_init(struct file *file, const char *buffer,  unsigned long 
     return -EFAULT;
  
   dev = dev_get_by_name(&init_net, iface);
+  net_enable_timestamp();
+
   if (!dev) {
     mason_logi("write_pfs_init: invalid dev name: '%s'", iface);
     return -EINVAL;
@@ -1506,6 +1511,7 @@ static int write_pfs_init(struct file *file, const char *buffer,  unsigned long 
 
  fail_rnd:
   dev_put(dev);
+  net_disable_timestamp();
   return -ENOMEM;
 }
 
@@ -1555,8 +1561,8 @@ static void destroy_netlink(void)
     netlink_kernel_release(nl_sk);
 }
 
-static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id, 
-				__u16 sender_id, __s8 rssi)
+static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pkt_id,
+				__u16 sender_id, __s8 rssi, ktime_t ktime)
 {
 #ifdef MASON_LOG_RECV
   struct sk_buff *skb = NULL;
@@ -1569,7 +1575,7 @@ static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_
   
   nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_RECV, sizeof(struct mason_nl_recv));
   rec = (struct mason_nl_recv *)NLMSG_DATA(nlh);
-  set_mason_nl_recv(rec, rnd_id, my_id, pos, pkt_id, sender_id, rssi);
+  set_mason_nl_recv(rec, rnd_id, my_id, pkt_id, sender_id, rssi, ktime);
   netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
   return;
 
@@ -1578,7 +1584,7 @@ static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_
 #endif
 }
 
-static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id)
+static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pkt_id, ktime_t ktime)
 {
 #ifdef MASON_LOG_SEND
   struct sk_buff *skb = NULL;
@@ -1590,7 +1596,7 @@ static void log_send_netlink(__u32 rnd_id, __u16 my_id, __u16 pos, __u16 pkt_id)
   
   nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_SEND, sizeof(struct mason_nl_send));
   snd = (struct mason_nl_send *)NLMSG_DATA(nlh);
-  set_mason_nl_send(snd, rnd_id, my_id, pos, pkt_id);
+  set_mason_nl_send(snd, rnd_id, my_id, pkt_id, ktime);
   netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
   return;
 

@@ -8,6 +8,7 @@
  */
 
 #include <stdlib.h>
+#include <inttypes.h>
 #include <unistd.h>
 #include <stdio.h>
 #include <string.h>
@@ -17,6 +18,7 @@
 #include <sys/socket.h>
 #include <linux/netlink.h>
 #include <netinet/in.h>
+#include <endian.h>
 
 #include "nl_mason.h"
 
@@ -179,8 +181,8 @@ void log_packets(void)
 	continue;
       recvmsg = (struct mason_nl_recv *)NLMSG_DATA(nlh);
       if (0 > (prc = 
-	       fprintf(logfd, "Received: rnd:%u my_id:%u time_or_position:%u packet_id:%u sender_id:%u rssi:%d\n", 
-		       ntohl(recvmsg->rnd_id), ntohs(recvmsg->my_id), ntohs(recvmsg->pos), ntohs(recvmsg->pkt_id),
+	       fprintf(logfd, "Received: rnd:%u my_id:%u time:%"PRIu64" packet_id:%u sender_id:%u rssi:%d\n", 
+		       ntohl(recvmsg->rnd_id), ntohs(recvmsg->my_id), be64toh(recvmsg->time_ns), ntohs(recvmsg->pkt_id),
 		       ntohs(recvmsg->sender_id), recvmsg->rssi))) {
 	syslog(LOG_ERR, "failed to log recvmsg: %s\n", strerror(prc));
       } 
@@ -191,8 +193,8 @@ void log_packets(void)
 	continue;
       sendmsg = (struct mason_nl_send *)NLMSG_DATA(nlh);
       if (0 > (prc = 
-	       fprintf(logfd, "Sent: rnd:%u my_id:%u time_or_position:%u packet_id:%u\n", ntohl(sendmsg->rnd_id), 
-		       ntohs(sendmsg->my_id), ntohs(sendmsg->pos), ntohs(sendmsg->pkt_id)))) {
+	       fprintf(logfd, "Sent: rnd:%u my_id:%u time:%"PRIu64" packet_id:%u\n", ntohl(sendmsg->rnd_id), 
+		       ntohs(sendmsg->my_id), be64toh(sendmsg->time_ns), ntohs(sendmsg->pkt_id)))) {
 	syslog(LOG_ERR, "failed to log sendmsg: %s\n", strerror(prc));
       }
       break;
