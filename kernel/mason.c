@@ -207,8 +207,8 @@ handle_txreq(struct rnd_info  *rnd, struct sk_buff *skb)
 static enum fsm_state handle_c_meas(struct rnd_info *rnd, struct sk_buff *skb)
 {
   del_fsm_timer(&rnd->fsm);
-  log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
-  record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
+  if (0 == record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb)))
+    log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
   mod_fsm_timer(&rnd->fsm, CLIENT_TIMEOUT);
   return fsm_c_txreq;
 }
@@ -403,8 +403,8 @@ static enum fsm_state handle_s_meas(struct rnd_info *rnd, struct sk_buff *skb)
   if (mason_sender_id(skb) != rnd->txreq_id) 
     return fsm_s_meas;
   del_fsm_timer(&rnd->fsm);
-  log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
-  record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb));
+  if (0 == record_new_obs(rnd->tbl, mason_sender_id(skb), mason_packet_id(skb), mason_rssi(skb)))
+    log_receive_netlink(rnd->rnd_id, rnd->my_id, mason_packet_id(skb), mason_sender_id(skb), mason_rssi(skb), skb->tstamp);
   return handle_next_txreq(rnd);
 }
 
@@ -1313,14 +1313,15 @@ static int mason_id_set_hwaddr(struct mason_id *id, const struct sk_buff *skb)
   return dev_parse_header(skb, id->hwaddr);
 }
 
-static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi)
+static int record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi)
 {
+  int rc;
   unsigned long flags;
   struct mason_id *msnid;
   struct rssi_obs *prev_obs, *obs;
 
   if (!tbl || (id > tbl->max_id) || !tbl->ids[id])
-    return;
+    return -EINVAL;
   
   /* The following code reads and writes to the id_table possibly
      "concurrently" with other writers, so grab spinlock */
@@ -1330,21 +1331,26 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   prev_obs = msnid->head;
   
   /* don't add if duplicate of previous insertion */
-  if (prev_obs && (pkt_id <= prev_obs->pkt_id))
+  if (prev_obs && (pkt_id <= prev_obs->pkt_id)) {
+    rc = -EEXIST;
     goto out;
+  }
 
   obs = kzalloc(sizeof(*obs), GFP_ATOMIC);
-  if (!obs)
+  if (!obs) {
+    rc = -ENOMEM;
     goto out;
+  }
   obs->sender_id = msnid;
   obs->pkt_id = pkt_id;
   obs->rssi = rssi;
   obs->next = prev_obs;
   msnid->head = obs;
+  rc = 0;
 
  out:
   spin_unlock_irqrestore(&tbl->lock, flags);
-  return;
+  return rc;
 }
 
 /* **************************************************************

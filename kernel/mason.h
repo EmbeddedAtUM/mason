@@ -310,7 +310,7 @@ static void free_rssi_obs_list(struct rssi_obs *ptr);
 static void free_mason_id(struct mason_id *ptr);
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[]);
 static int mason_id_set_hwaddr(struct mason_id *id, const struct sk_buff *skb);
-static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
+static int record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi);
 
 static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key);
 
