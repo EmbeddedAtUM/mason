@@ -41,6 +41,12 @@ static LIST_HEAD(fsm_list);
 static DEFINE_SPINLOCK(fsm_list_lock);
 static unsigned long fsm_list_flags = 0;
 
+#define NL_MSG_INIT "INIT"
+#define NL_MSG_ENDPAR "ENDPAR"
+#define NL_MSG_ENDPARLIST "ENDPARLIST"
+#define NL_MSG_ENDMEAS "ENDMEAS"
+#define NL_MSG_DONE "DONE"
+
 /* **************************************************************
  * State Machine transition functions
  * ************************************************************** */
@@ -353,6 +359,7 @@ static inline enum fsm_state fsm_s_abort(struct rnd_info *rnd, const char *msg)
 
 static enum fsm_state fsm_s_finish(struct rnd_info *rnd)
 {
+  log_msg_netlink(rnd->rnd_id, rnd->my_id, ktime_get_real(), sizeof(NL_MSG_DONE), NL_MSG_DONE);
   mason_logi_label(rnd, "finished round");
   del_fsm(&rnd->fsm, free_rnd_info);
   return fsm_term;
@@ -428,6 +435,7 @@ static enum fsm_state handle_next_txreq(struct rnd_info *rnd)
   }
 
   /* Otherwise, start the rsstreqs */  
+  log_msg_netlink(rnd->rnd_id, rnd->my_id, ktime_get_real(), sizeof(NL_MSG_ENDMEAS), NL_MSG_ENDMEAS);
   rnd->txreq_id = 1;
   return handle_next_rsstreq(rnd, 1);
 }
@@ -521,7 +529,9 @@ static enum fsm_state fsm_s_par_timeout(struct fsm *fsm)
   mason_logd_label(rnd, "initiator timed out while waiting for PAR packet");
   if (rnd->tbl->max_id >= MIN_PARTICIPANTS) {
     mason_logi_label(rnd, "total participants: %u", rnd->tbl->max_id);
+    log_msg_netlink(rnd->rnd_id, rnd->my_id, ktime_get_real(), sizeof(NL_MSG_ENDPAR), NL_MSG_ENDPAR);
     while (0 == bcast_mason_packet(create_mason_parlist(rnd, &cur_id)));
+    log_msg_netlink(rnd->rnd_id, rnd->my_id, ktime_get_real(), sizeof(NL_MSG_ENDPARLIST), NL_MSG_ENDPARLIST);
     ret = handle_next_txreq(rnd);
   } else {
     ret = fsm_s_abort(rnd, "not enough participants");
@@ -562,6 +572,7 @@ static void fsm_start_initiator(struct fsm *fsm, struct net_device *dev)
   if (0 != bcast_mason_packet(create_mason_init(rnd))) {
     ret = fsm_s_abort(rnd, "failed to send INIT packet");
   } else {
+    log_msg_netlink(rnd->rnd_id, rnd->my_id, ktime_get_real(), sizeof(NL_MSG_INIT), NL_MSG_INIT);
     mod_fsm_timer(&rnd->fsm, PAR_TIMEOUT);
     ret = fsm_s_par;
   }
@@ -1565,6 +1576,28 @@ static void destroy_netlink(void)
 {
   if (nl_sk)
     netlink_kernel_release(nl_sk);
+}
+
+static void log_msg_netlink(const __u32 rnd_id, const __u16 my_id, const ktime_t ktime,
+			    const unsigned char msglen, const char msg[]) {
+#ifdef MASON_LOG_MSG
+  struct sk_buff *skb = NULL;
+  struct nlmsghdr *nlh;
+  struct mason_nl_msg *pkt;
+
+  skb = alloc_skb(NLMSG_SPACE(sizeof(struct mason_nl_msg)), GFP_ATOMIC);
+  if (!skb)
+    return;
+
+  nlh = NLMSG_PUT(skb, 0, 0, MASON_NL_MSG, sizeof(struct mason_nl_msg));
+  pkt = (struct mason_nl_msg *)NLMSG_DATA(nlh);
+  set_mason_nl_msg(pkt, rnd_id, my_id, ktime, msglen, msg);
+  netlink_broadcast(nl_sk, skb, 0, MASON_NL_GRP, GFP_ATOMIC);
+  return;
+
+ nlmsg_failure: /* Goto in NLMSG_PUT macro */
+  kfree_skb(skb);
+#endif
 }
 
 static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pkt_id,

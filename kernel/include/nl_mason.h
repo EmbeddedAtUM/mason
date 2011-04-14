@@ -19,8 +19,9 @@
 #define MASON_NL_RECV 0
 #define MASON_NL_SEND 1
 #define MASON_NL_ADDR 2
+#define MASON_NL_MSG  3
 
-#define MASON_NL_SIZE 20 /* mason_nl_addr is largest */
+#define MASON_NL_SIZE 26 /* mason_nl_msg is largest */
 
 struct mason_nl_recv {
   __be32 rnd_id;
@@ -45,8 +46,25 @@ struct mason_nl_addr {
   char   addr[12];
 }__attribute__((__packed__)); /* 20 bytes */
 
+struct mason_nl_msg {
+  __be32 rnd_id;
+  __be16 my_id;
+  __be64 time_ns;
+  char msg[12];
+}__attribute__((__packed__)); /* 26 bytes  */
 
 #ifdef __KERNEL__
+static inline void set_mason_nl_msg(struct mason_nl_msg *pkt, const __u32 rnd_id, const __u16 my_id,
+				    const ktime_t ktime, const unsigned char msglen, const char msg[])
+{
+  if (!pkt || !pkt || sizeof(pkt->msg) < msglen)
+    return;
+  pkt->rnd_id = htonl(rnd_id);
+  pkt->my_id = htons(my_id);
+  pkt->time_ns = __cpu_to_be64(ktime_to_ns(ktime));
+  memcpy(pkt->msg, msg, msglen);
+}
+
 static inline void set_mason_nl_addr(struct mason_nl_addr *adr, __u32 rnd_id,
 				     __u16 id, __u16 addrlen, char hwaddr[])
 {

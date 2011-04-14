@@ -178,6 +178,7 @@ void log_packets(void)
   struct mason_nl_recv *recvmsg;
   struct mason_nl_send *sendmsg;
   struct mason_nl_addr *addrmsg;
+  struct mason_nl_msg  *msgmsg;
   unsigned int len;
   int prc, i;
   nlh = (struct nlmsghdr *)malloc(nlhlen);
@@ -211,6 +212,17 @@ void log_packets(void)
 	       fprintf(logfd, "Sent: rnd:%u my_id:%u time:%"PRIu64" packet_id:%u\n", ntohl(sendmsg->rnd_id), 
 		       ntohs(sendmsg->my_id), be64toh(sendmsg->time_ns), ntohs(sendmsg->pkt_id)))) {
 	syslog(LOG_ERR, "failed to log sendmsg: %s\n", strerror(prc));
+      }
+      break;
+    case MASON_NL_MSG:
+      if (nlh->nlmsg_len < sizeof(*msgmsg) ||
+	  len < NLMSG_SPACE(sizeof(*msgmsg)))
+	continue;
+      msgmsg = (struct mason_nl_msg *)NLMSG_DATA(nlh);
+      if (0 > (prc =
+	       fprintf(logfd, "%s: rnd:%u my_id:%u time:%"PRIu64"\n", msgmsg->msg,
+		       ntohl(msgmsg->rnd_id), ntohs(msgmsg->my_id), be64toh(msgmsg->time_ns)))){
+	syslog(LOG_ERR, "failed to log msmsg: %s\n", strerror(prc));
       }
       break;
     case MASON_NL_ADDR:

@@ -349,6 +349,8 @@ static void log_receive_netlink(__u32 rnd_id, __u16 my_id, __u16 pkt_id,
 static void log_send_netlink(__u32 rnd_id, __u16 my_id,
 			     __u16 pkt_id, ktime_t ktime);
 static void log_addr_netlink(__u32 rnd_id, __u16 id, struct sk_buff *skb_addr);
+static void log_msg_netlink(const __u32 rnd_id, const __u16 my_id, const ktime_t ktime,
+			    const unsigned char msglen, const char msg[]);
 
 #endif /* _MASON_H */
 
