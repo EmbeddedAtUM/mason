@@ -1309,7 +1309,7 @@ static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rs
   prev_obs = msnid->head;
   
   /* don't add if duplicate of last insertion */
-  if (prev_obs && pkt_id == prev_obs->sender_id->id)
+  if (prev_obs && pkt_id <= prev_obs->sender_id->id)
     return;
 
   obs = kzalloc(sizeof(*obs), GFP_ATOMIC);
