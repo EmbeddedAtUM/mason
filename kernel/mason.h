@@ -234,6 +234,8 @@ struct id_table {
   struct mason_id *ids[MAX_PARTICIPANTS];
   __u16 max_id;
   struct kref kref;
+  spinlock_t lock; /* Multiple 'attacker' clients on the same
+			     device share the id_table state */
   struct hlist_head ht[256];
 };
 
@@ -241,6 +243,7 @@ struct id_table {
   do {									\
     int __i;								\
     kref_init(&ptr->kref);						\
+    spin_lock_init(&ptr->lock);						\
     for (__i = 0; __i < 256; ++__i)					\
       INIT_HLIST_HEAD(&(ptr)->ht[__i]);					\
   } while(0)

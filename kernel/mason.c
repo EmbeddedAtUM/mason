@@ -1266,20 +1266,33 @@ static int id_table_add_mason_id(struct id_table *tbl, struct mason_id *mid)
 
 static int add_identity(struct rnd_info *rnd, const __u16 sender_id, const __u8 *pub_key)
 {
+  int rc;
+  unsigned long flags; /* saved IRQ state */
   struct id_table *tbl;
   struct mason_id *mid;
   tbl = rnd->tbl;
 
-  if (id_table_contains_pub_key(tbl, pub_key))
-    return -EEXIST;
+  /* The following code reads and writes to the id_table possibly
+     "concurrently" with other writers, so grab spinlock */
+  spin_lock_irqsave(&tbl->lock, flags);
+
+  if (id_table_contains_pub_key(tbl, pub_key)) {
+    rc = -EEXIST;
+    goto out;
+  }
 
   mid = kmalloc(sizeof(struct mason_id), GFP_ATOMIC);
   if (!mid) {
     mason_loge_label(rnd, "failed to allocate memory for 'struct mason_id'");
-    return -ENOMEM;
+    rc = -ENOMEM;
+    goto out;
   }
   mason_id_init(mid, sender_id, pub_key);
-  return id_table_add_mason_id(tbl, mid);
+  rc = id_table_add_mason_id(tbl, mid);
+
+ out:
+  spin_unlock_irqrestore(&tbl->lock, flags);
+  return rc;
 }
 
 static void mason_id_init(struct mason_id *mid, const __u16 id, const __u8 pub_key[])
@@ -1299,27 +1312,36 @@ static int mason_id_set_hwaddr(struct mason_id *id, const struct sk_buff *skb)
 
 static void record_new_obs(struct id_table *tbl, __u16 id, __u16 pkt_id, __s8 rssi)
 {
+  unsigned long flags;
   struct mason_id *msnid;
   struct rssi_obs *prev_obs, *obs;
 
   if (!tbl || (id > tbl->max_id) || !tbl->ids[id])
     return;
   
+  /* The following code reads and writes to the id_table possibly
+     "concurrently" with other writers, so grab spinlock */
+  spin_lock_irqsave(&tbl->lock, flags);
+
   msnid = tbl->ids[id];
   prev_obs = msnid->head;
   
   /* don't add if duplicate of last insertion */
   if (prev_obs && pkt_id <= prev_obs->sender_id->id)
-    return;
+    goto out;
 
   obs = kzalloc(sizeof(*obs), GFP_ATOMIC);
   if (!obs)
-    return;
+    goto out;
   obs->sender_id = msnid;
   obs->pkt_id = pkt_id;
   obs->rssi = rssi;
   obs->next = prev_obs;
   msnid->head = obs;
+
+ out:
+  spin_unlock_irqrestore(&tbl->lock, flags);
+  return;
 }
 
 /* **************************************************************
