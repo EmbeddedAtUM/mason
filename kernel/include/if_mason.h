@@ -20,10 +20,6 @@
 #include <asm/byteorder.h>
 #endif
 
-/* Packet sizes */
-#define LL_MTU  1500 /* TODO: This should be determined dynamically from
-			the active device */
-
 /* Mason Protocol ethertype*/
 #define ETH_P_MASON   0x2355
 #define MASON_VERSION 0x0
