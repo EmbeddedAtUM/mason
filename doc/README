@@ -1,0 +1,6 @@
+# Date: August 29, 2013
+# Author: David R. Bild
+
+The state machine diagram (fsm.dot/fsm.pdf) may be outdated.  It
+should be close enough to help understand the control flow, but might
+need updated to be completely correct.
