@@ -1,10 +1,11 @@
-/* masond.c --- 
+/* masonloopd.c --- 
  * 
- * Filename: masond.c
+ * Filename: masonloopd.c
  * Author: David R. Bild
  * Created: 12/07/2010
  * 
- * Description: User-space daemon for logging mason protocol packets
+ * Description: User-space daemon for initiating mason tests
+ * periodically.
  */
 
 #include <stdlib.h>
