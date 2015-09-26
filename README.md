@@ -7,8 +7,8 @@ Description
 -----------
 
 The Mason test is a protocol for detecting Sybil identities in 802.11
-ad hoc wireless networks.  See our [technical
-report](http://coming.soon) for a full description.
+ad hoc wireless networks.  See our 
+[journal publication](http://arxiv.org/abs/1403.5871) for a full description.
 
 Status
 ------
